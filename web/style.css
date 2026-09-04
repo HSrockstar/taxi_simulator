@@ -1,0 +1,80 @@
+:root {
+  color-scheme: dark;
+  --bg: #071016;
+  --panel: rgba(14, 28, 37, 0.88);
+  --line: rgba(142, 190, 205, 0.16);
+  --text: #eef8fa;
+  --muted: #89a6ae;
+  --cyan: #45d7e7;
+  --green: #43e39b;
+  --red: #ff5f6d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 1040px;
+  min-height: 100vh;
+  padding: 28px 34px 36px;
+  color: var(--text);
+  font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 16% 10%, rgba(35, 121, 137, .18), transparent 34%),
+    radial-gradient(circle at 90% 94%, rgba(35, 100, 80, .13), transparent 30%),
+    var(--bg);
+}
+
+header {
+  max-width: 1500px;
+  margin: 0 auto 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.eyebrow { margin: 0 0 7px; color: var(--cyan); font: 600 11px/1.2 "Segoe UI"; letter-spacing: .24em; }
+h1 { margin: 0; font-size: 29px; letter-spacing: .03em; }
+.subtitle, .panel-title p { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+.status { display: flex; align-items: center; gap: 9px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 100px; color: var(--muted); font-size: 12px; }
+#status-dot { width: 8px; height: 8px; border-radius: 50%; background: #f6b34b; box-shadow: 0 0 10px currentColor; }
+#status-dot.online { background: var(--green); }
+#status-dot.offline { background: var(--red); }
+
+main { max-width: 1500px; margin: 0 auto; display: grid; grid-template-columns: minmax(680px, 1.45fr) minmax(390px, .75fr); gap: 18px; }
+.panel { border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 18px 50px rgba(0, 0, 0, .22); backdrop-filter: blur(14px); }
+.map-card { padding: 20px; }
+.panel-title { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 17px; }
+.panel-title h2 { margin: 0; font-size: 16px; letter-spacing: .04em; }
+.panel-title.compact { margin-bottom: 14px; }
+.legend { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+.legend span { width: 9px; height: 9px; margin-left: 9px; border-radius: 2px; }
+.legend .red { background: var(--red); box-shadow: 0 0 8px rgba(255, 95, 109, .65); }
+.legend .green { background: var(--green); box-shadow: 0 0 8px rgba(67, 227, 155, .55); }
+.canvas-wrap { position: relative; width: min(100%, 760px); margin: 0 auto; }
+canvas { display: block; width: 100%; height: auto; border: 1px solid rgba(119, 181, 196, .24); border-radius: 10px; background: #081218; image-rendering: pixelated; }
+.tooltip { position: absolute; display: none; pointer-events: none; padding: 8px 10px; border-radius: 7px; background: rgba(4, 11, 15, .96); border: 1px solid var(--line); color: var(--text); font-size: 11px; white-space: nowrap; }
+
+aside { display: grid; grid-template-rows: auto minmax(300px, 1fr); gap: 18px; }
+.metrics, .logs { padding: 19px; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.metric-grid article { min-width: 0; padding: 12px; border-radius: 10px; background: rgba(5, 16, 22, .64); border: 1px solid rgba(134, 191, 205, .10); }
+.metric-grid span, .metric-grid small { display: block; color: var(--muted); font-size: 10px; }
+.metric-grid strong { display: block; margin: 7px 0 3px; overflow: hidden; color: var(--cyan); font: 600 21px/1 "Segoe UI"; text-overflow: ellipsis; }
+.controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 13px; }
+button { border: 0; border-radius: 9px; padding: 11px; color: #031014; background: var(--cyan); font: 600 13px "Microsoft YaHei UI"; cursor: pointer; transition: transform .15s, filter .15s; }
+button:hover { transform: translateY(-1px); filter: brightness(1.08); }
+button.secondary { color: var(--text); background: rgba(113, 151, 161, .18); border: 1px solid var(--line); }
+.logs { min-height: 0; }
+.log-list { height: 370px; overflow-y: auto; padding-right: 5px; }
+.log-list p { margin: 0 0 7px; padding: 8px 10px; border-left: 2px solid rgba(69, 215, 231, .35); background: rgba(5, 14, 20, .55); color: #bdd0d5; font: 11px/1.55 Consolas, "Microsoft YaHei UI"; }
+.log-list p.success { border-left-color: var(--green); }
+.log-list p.cancel { border-left-color: var(--red); }
+.log-list p.dispatch { border-left-color: #f6b34b; }
+.log-list .empty { color: var(--muted); text-align: center; border: 0; background: transparent; padding-top: 60px; }
+
+@media (max-width: 1180px) {
+  body { padding: 22px; }
+  main { grid-template-columns: minmax(620px, 1.3fr) 380px; }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+}

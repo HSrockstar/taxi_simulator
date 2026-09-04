@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智能网约车实时派单平台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">REAL-TIME DISPATCH CONTROL</p>
+      <h1>智能网约车实时派单平台</h1>
+      <p class="subtitle">100 × 100 时空网格 · 动态供需平衡 · C++ 多线程引擎</p>
+    </div>
+    <div class="status"><span id="status-dot"></span><span id="status-text">正在连接</span></div>
+  </header>
+
+  <main>
+    <section class="map-card panel">
+      <div class="panel-title">
+        <div><h2>城市供需热力图</h2><p>红色代表订单积压，绿色代表空闲运力</p></div>
+        <div class="legend"><span class="red"></span>需求缺口 <span class="green"></span>运力富余</div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="heatmap" width="700" height="700" aria-label="城市供需热力图"></canvas>
+        <div id="tooltip" class="tooltip"></div>
+      </div>
+    </section>
+
+    <aside>
+      <section class="metrics panel">
+        <div class="panel-title compact"><div><h2>全局指标</h2><p id="tick">模拟时间 0 秒</p></div></div>
+        <div class="metric-grid">
+          <article><span>等待队列</span><strong id="queue">0</strong><small>个订单</small></article>
+          <article><span>派单成功率</span><strong id="rate">0%</strong><small>已结束订单</small></article>
+          <article><span>成功派单</span><strong id="matched">0</strong><small>累计</small></article>
+          <article><span>超时取消</span><strong id="cancelled">0</strong><small>累计</small></article>
+          <article><span>平均撮合</span><strong id="average">0</strong><small>微秒</small></article>
+          <article><span>累计撮合</span><strong id="total">0</strong><small>微秒</small></article>
+        </div>
+        <div class="controls">
+          <button id="pause">暂停模拟</button>
+          <button id="reset" class="secondary">重置数据</button>
+        </div>
+      </section>
+
+      <section class="logs panel">
+        <div class="panel-title compact"><div><h2>实时派单日志</h2><p>最近 50 条引擎事件</p></div></div>
+        <div id="log-list" class="log-list"><p class="empty">等待事件……</p></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
