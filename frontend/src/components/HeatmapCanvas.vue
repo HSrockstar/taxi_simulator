@@ -31,6 +31,7 @@ const spritePalettes: Record<SpriteKey, [string, string]> = {
 }
 
 let hotCells: HotCell[] = []
+let alertCells: HotCell[] = []
 let layerSize = 0
 let hoverCell: { x: number; y: number } | null = null
 let rafId = 0
@@ -144,7 +145,9 @@ function buildBase(snapshot: DashboardSnapshot, size: number): void {
 
   if (!gridImage) gridImage = offscreenContext.createImageData(100, 100)
   const data = gridImage.data
+  const threshold = snapshot.params.imbalanceThreshold
   hotCells = []
+  alertCells = []
   for (let index = 0; index < 10000; index += 1) {
     const pending = snapshot.pending[index]
     const idle = snapshot.idle[index]
@@ -156,12 +159,15 @@ function buildBase(snapshot: DashboardSnapshot, size: number): void {
     data[offset + 3] = 255
     const difference = pending - idle
     if (difference > 0) {
-      hotCells.push({
+      const cellInfo = {
         x: index % 100,
         y: Math.floor(index / 100),
         strength: Math.min(1, difference / 5),
         phase: (index % 17) * 0.7,
-      })
+      }
+      hotCells.push(cellInfo)
+      // 与调度引擎同一判据：差值达到失衡阈值的格子标记为红色警报热点区
+      if (difference >= threshold) alertCells.push(cellInfo)
     }
   }
   offscreenContext.putImageData(gridImage, 0, 0)
@@ -211,6 +217,15 @@ function composite(now: number): void {
       }
       context.globalAlpha = 1
       context.globalCompositeOperation = 'source-over'
+
+      // 红色警报热点区：差值达到失衡阈值的格子同步呼吸描框，随参数面板实时增减
+      const alertPulse = 0.55 + 0.4 * Math.sin(seconds * 2.4)
+      context.strokeStyle = `rgba(255, 84, 98, ${alertPulse.toFixed(3)})`
+      context.lineWidth = Math.max(1.2, cell * 0.14)
+      const inset = Math.max(0.6, cell * 0.1)
+      for (const alert of alertCells) {
+        context.strokeRect(alert.x * cell + inset, alert.y * cell + inset, cell - inset * 2, cell - inset * 2)
+      }
 
       // 调度流向：起点到热点格的渐隐路径，司机点沿线移动；
       // 司机点在这里画，下方静态循环跳过 REBALANCING 避免重复
@@ -345,11 +360,12 @@ onBeforeUnmount(() => {
     <div class="panel-heading">
       <div>
         <h2>城市供需热力图</h2>
-        <p class="heading-description">红色区域存在订单积压，绿色代表运力富余，青色路径为司机调往热点的流向。</p>
+        <p class="heading-description">红色代表订单积压，绿色代表运力富余，红框为达到失衡阈值的警报热点区，青色路径为调度流向。</p>
       </div>
       <div class="map-legend" aria-label="热力图图例">
         <span class="data-chip chip-demand"><i></i>需求缺口</span>
         <span class="data-chip chip-supply"><i></i>运力富余</span>
+        <span class="data-chip chip-alert"><i></i>警报热点 ≥ <b>{{ snapshot?.params.imbalanceThreshold ?? 2 }}</b></span>
       </div>
     </div>
     <div class="map-frame">
