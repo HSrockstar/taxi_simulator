@@ -1,0 +1,5 @@
+# 前端依赖由 package-lock.json 锁定，不纳入源码仓库。
+frontend/node_modules/
+
+# TypeScript 增量构建缓存。
+frontend/*.tsbuildinfo

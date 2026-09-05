@@ -3,10 +3,46 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
 namespace taxi {
+namespace {
+
+bool isSafeStaticPath(const std::string& path) {
+    if (path.empty() || path.front() != '/' || path.find("..") != std::string::npos ||
+        path.find('\\') != std::string::npos) {
+        return false;
+    }
+    for (const unsigned char character : path) {
+        if (!std::isalnum(character) && character != '/' && character != '.' &&
+            character != '-' && character != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string contentTypeFor(const std::string& fileName) {
+    const std::size_t extensionStart = fileName.find_last_of('.');
+    if (extensionStart == std::string::npos) {
+        return {};
+    }
+    const std::string extension = fileName.substr(extensionStart);
+    if (extension == ".html") return "text/html; charset=utf-8";
+    if (extension == ".css") return "text/css; charset=utf-8";
+    if (extension == ".js") return "application/javascript; charset=utf-8";
+    if (extension == ".json") return "application/json; charset=utf-8";
+    if (extension == ".svg") return "image/svg+xml";
+    if (extension == ".png") return "image/png";
+    if (extension == ".webp") return "image/webp";
+    if (extension == ".ico") return "image/x-icon";
+    if (extension == ".woff2") return "font/woff2";
+    return {};
+}
+
+}  // namespace
 
 HttpServer::HttpServer(Simulator& simulator, std::uint16_t port, std::string webRoot)
     : simulator_(simulator), port_(port), webRoot_(std::move(webRoot)) {}
@@ -151,18 +187,18 @@ void HttpServer::handleClient(std::uintptr_t rawClientSocket) {
 }
 
 std::string HttpServer::readStaticFile(const std::string& requestPath, std::string& contentType) const {
-    std::string fileName;
-    if (requestPath == "/" || requestPath == "/index.html") {
+    if (!isSafeStaticPath(requestPath)) {
+        contentType.clear();
+        return {};
+    }
+
+    std::string fileName = requestPath == "/" ? "index.html" : requestPath.substr(1);
+    contentType = contentTypeFor(fileName);
+    if (contentType.empty() && fileName.find('.') == std::string::npos) {
         fileName = "index.html";
         contentType = "text/html; charset=utf-8";
-    } else if (requestPath == "/style.css") {
-        fileName = "style.css";
-        contentType = "text/css; charset=utf-8";
-    } else if (requestPath == "/app.js") {
-        fileName = "app.js";
-        contentType = "application/javascript; charset=utf-8";
-    } else {
-        contentType.clear();
+    }
+    if (contentType.empty()) {
         return {};
     }
 

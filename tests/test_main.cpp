@@ -186,10 +186,10 @@ void testHttpServer() {
           "HTTP 暂停控制接口");
 
     const std::string staticFile = httpRequest(port,
-        "GET /style.css HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     check(staticFile.find("HTTP/1.1 200 OK") != std::string::npos &&
-          staticFile.find("text/css") != std::string::npos,
-          "HTTP 静态资源白名单");
+          staticFile.find("text/html") != std::string::npos,
+          "HTTP 提供前端入口页面");
 
     const std::string missing = httpRequest(port,
         "GET /secret.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
