@@ -165,12 +165,30 @@ void testSimulatorAlgorithms() {
     simulator.testTick();
     check(simulator.testMatched() == 1 && simulator.testQueueSize() == 0,
           "订单匹配得分最优司机");
-    check(simulator.testDriver(1).state == taxi::DriverState::Serving &&
+    check(simulator.testDriver(1).state == taxi::DriverState::EnRoute &&
+          simulator.testActiveOrder(1).state == taxi::OrderState::Matched &&
           simulator.testDriver(0).state == taxi::DriverState::Idle,
-          "司机不会被重复派单且高评分者胜出");
-    for (int tick = 0; tick < 20; ++tick) simulator.testTick();
+          "撮合后司机先前往接客且订单记为已匹配");
+    simulator.testTick();
+    simulator.testTick();
+    check(simulator.testDriver(1).state == taxi::DriverState::OnTrip,
+          "接到乘客后进入行程中状态");
+    for (int tick = 0; tick < 30; ++tick) simulator.testTick();
     check(simulator.testCompleted() == 1 && simulator.testDriver(1).state == taxi::DriverState::Idle,
           "行程完成后司机重新进入空闲状态");
+    check(simulator.testActiveOrder(1).state == taxi::OrderState::Completed,
+          "订单在行程结束时流转为已完成");
+
+    const std::string tripSnapshot = simulator.snapshotJson();
+    check(tripSnapshot.find("[行程开始]") != std::string::npos &&
+          tripSnapshot.find("[行程完成]") != std::string::npos,
+          "行程开始与行程完成写入实时日志");
+
+    const std::string totalKey = "\"totalMatchMicros\":";
+    const std::size_t totalPos = tripSnapshot.find(totalKey);
+    check(totalPos != std::string::npos &&
+          std::stoull(tripSnapshot.substr(totalPos + totalKey.size())) > 0,
+          "撮合耗时累计进入全局指标");
 
     simulator.testClearState();
     simulator.testPushOrder(2, 500, 500);

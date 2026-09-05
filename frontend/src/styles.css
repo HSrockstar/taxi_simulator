@@ -143,8 +143,11 @@ h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .03em; }
 .chip-queue i { background: var(--amber); }
 .chip-rate i { background: var(--cyan); }
 .chip-alert i { background: transparent; border: 1.5px solid var(--red); border-radius: 2px; box-shadow: 0 0 7px rgba(255, 111, 125, .6); }
+.chip-enroute i { background: #ffba64; }
+.chip-ontrip i { background: #c4a4ff; }
 
 .map-legend, .trend-chips { display: flex; flex: none; gap: 8px; }
+.map-legend { flex-wrap: wrap; }
 
 /* ---------- 热力图 ---------- */
 
@@ -312,6 +315,8 @@ button svg { flex: none; }
 .log-dot { flex: none; width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: #5e8894; }
 .log-seq { flex: none; color: #6d93a0; }
 .log-success .log-dot { background: var(--green); box-shadow: 0 0 8px rgba(79, 230, 164, .7); }
+.log-pickup .log-dot { background: #ffba64; box-shadow: 0 0 8px rgba(255, 186, 100, .7); }
+.log-complete .log-dot { background: #c4a4ff; box-shadow: 0 0 8px rgba(196, 164, 255, .7); }
 .log-cancel .log-dot { background: var(--red); box-shadow: 0 0 8px rgba(255, 111, 125, .7); }
 .log-dispatch .log-dot { background: var(--amber); box-shadow: 0 0 8px rgba(246, 201, 96, .7); }
 .log-msg { min-width: 0; overflow-wrap: anywhere; }

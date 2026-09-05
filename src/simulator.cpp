@@ -15,11 +15,18 @@ constexpr int kHotspotOrigins[3][2] = {
     {450, 700}
 };
 
+// 接客在途时长：按撮合距离估算（约 300 米/模拟秒），最短 2 秒保证"前往接客"状态可见
+int pickupTicksFor(double distance) {
+    const int ticks = static_cast<int>(std::ceil(distance / 300.0));
+    return std::clamp(ticks, 2, 6);
+}
+
 }  // namespace
 
 Simulator::Simulator(std::uint32_t seed)
     : seed_(seed), schedulerRandom_(seed ^ 0x9E3779B9U) {
     drivers_ = new Driver[kMaxDriverCount];
+    activeOrders_ = new Order[kMaxDriverCount];
     std::lock_guard<std::mutex> lock(stateMutex_);
     resetStateLocked();
 }
@@ -27,6 +34,7 @@ Simulator::Simulator(std::uint32_t seed)
 Simulator::~Simulator() {
     stop();
     delete[] drivers_;
+    delete[] activeOrders_;
 }
 
 void Simulator::start() {
@@ -125,6 +133,7 @@ void Simulator::resetStateLocked() {
     std::uniform_real_distribution<double> rating(3.5, 5.0);
     for (int index = 0; index < kMaxDriverCount; ++index) {
         drivers_[index] = Driver{};
+        activeOrders_[index] = Order{};
     }
     for (int index = 0; index < params_.driverCount; ++index) {
         Driver& driver = drivers_[index];
@@ -155,8 +164,17 @@ void Simulator::applyFleetChangeLocked(int previousCount, int newCount) {
         return;
     }
     for (int index = previousCount - 1; index >= newCount; --index) {
-        grid_.removeDriver(&drivers_[index]);
-        drivers_[index] = Driver{};
+        Driver& driver = drivers_[index];
+        if (driver.activeOrderId != 0) {
+            Order& order = activeOrders_[index];
+            order.state = OrderState::Cancelled;
+            ++cancelled_;
+            std::ostringstream message;
+            message << "[订单取消] 订单#" << order.id << " 司机下线服务中断";
+            logs_.push(message.str());
+        }
+        grid_.removeDriver(&driver);
+        driver = Driver{};
     }
 }
 
@@ -185,20 +203,65 @@ bool Simulator::updateParams(const SimulatorParams& params) {
 void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
     for (int index = 0; index < params_.driverCount; ++index) {
         Driver& driver = drivers_[index];
-        if (driver.state == DriverState::Idle || driver.readyTick > currentTick) {
+        if (driver.state == DriverState::Idle) {
             continue;
         }
-        const DriverState previousState = driver.state;
+        if (driver.state == DriverState::EnRoute || driver.state == DriverState::OnTrip) {
+            stepTripDriverLocked(index, driver, currentTick);
+            continue;
+        }
+        // 调度行程固定 2 个 tick，到达热点格后回归空闲并入格
+        if (driver.readyTick > currentTick) {
+            continue;
+        }
         driver.x = driver.targetX;
         driver.y = driver.targetY;
         driver.state = DriverState::Idle;
         driver.readyTick = 0;
         driver.activeOrderId = 0;
         grid_.addDriver(&driver);
-        if (previousState == DriverState::Serving) {
-            ++completed_;
-        }
     }
+}
+
+void Simulator::stepTripDriverLocked(int slot, Driver& driver, std::uint64_t currentTick) {
+    if (driver.readyTick > currentTick) {
+        // 剩余路程按剩余 tick 数均摊逐步推进，最后一 tick 由到达分支精确落点
+        const double remaining = static_cast<double>(driver.readyTick - currentTick);
+        driver.x += static_cast<int>(std::lround((driver.targetX - driver.x) / remaining));
+        driver.y += static_cast<int>(std::lround((driver.targetY - driver.y) / remaining));
+        return;
+    }
+    if (driver.state == DriverState::EnRoute) {
+        // 到达上车点：接到乘客，转入行程中并生成前往目的地的行程
+        driver.x = driver.targetX;
+        driver.y = driver.targetY;
+        driver.state = DriverState::OnTrip;
+        std::uniform_int_distribution<int> destination(0, kMapSize - 1);
+        std::uniform_int_distribution<int> tripDuration(8, 20);
+        driver.readyTick = currentTick + static_cast<std::uint64_t>(tripDuration(schedulerRandom_));
+        driver.targetX = destination(schedulerRandom_);
+        driver.targetY = destination(schedulerRandom_);
+        std::ostringstream message;
+        message << "[行程开始] 订单#" << activeOrders_[slot].id << " 乘客已上车，司机#"
+                << std::setw(3) << std::setfill('0') << driver.id << " 前往目的地";
+        logs_.push(message.str());
+        return;
+    }
+    // 行程到达目的地：订单流转为已完成，司机回归空闲并入格参与下一轮撮合
+    driver.x = driver.targetX;
+    driver.y = driver.targetY;
+    driver.state = DriverState::Idle;
+    driver.readyTick = 0;
+    Order& order = activeOrders_[slot];
+    order.state = OrderState::Completed;
+    ++completed_;
+    std::ostringstream message;
+    message << "[行程完成] 订单#" << order.id << " 由司机#"
+            << std::setw(3) << std::setfill('0') << driver.id
+            << " 完成，全程耗时 " << (currentTick - order.createdTick) << " 秒";
+    logs_.push(message.str());
+    driver.activeOrderId = 0;
+    grid_.addDriver(&driver);
 }
 
 void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
@@ -227,8 +290,6 @@ void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
 
 void Simulator::processOrdersLocked(std::uint64_t currentTick) {
     const std::size_t batchSize = orders_.size();
-    std::uniform_int_distribution<int> destination(0, kMapSize - 1);
-    std::uniform_int_distribution<int> tripDuration(8, 20);
 
     for (std::size_t index = 0; index < batchSize; ++index) {
         Order order;
@@ -269,12 +330,14 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
 
         --orderCell.pendingCount;
         grid_.removeDriver(driver);
-        driver->state = DriverState::Serving;
-        driver->readyTick = currentTick + static_cast<std::uint64_t>(tripDuration(schedulerRandom_));
-        driver->targetX = destination(schedulerRandom_);
-        driver->targetY = destination(schedulerRandom_);
+        const int slot = static_cast<int>(driver - drivers_);
+        driver->state = DriverState::EnRoute;
+        driver->readyTick = currentTick + static_cast<std::uint64_t>(pickupTicksFor(distance));
+        driver->targetX = order.x;
+        driver->targetY = order.y;
         driver->activeOrderId = order.id;
         order.state = OrderState::Matched;
+        activeOrders_[slot] = order;
         ++matched_;
 
         std::ostringstream message;
@@ -404,7 +467,8 @@ Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
 const char* Simulator::driverStateName(DriverState state) {
     switch (state) {
         case DriverState::Idle: return "IDLE";
-        case DriverState::Serving: return "SERVING";
+        case DriverState::EnRoute: return "EN_ROUTE";
+        case DriverState::OnTrip: return "ON_TRIP";
         case DriverState::Rebalancing: return "REBALANCING";
     }
     return "UNKNOWN";
@@ -497,6 +561,7 @@ void Simulator::testClearState() {
     autoGenerate_ = false;
     for (int index = 0; index < kMaxDriverCount; ++index) {
         drivers_[index] = Driver{};
+        activeOrders_[index] = Order{};
     }
 }
 
@@ -528,6 +593,11 @@ void Simulator::testTick() {
 Driver Simulator::testDriver(int slot) const {
     std::lock_guard<std::mutex> lock(stateMutex_);
     return drivers_[slot];
+}
+
+Order Simulator::testActiveOrder(int slot) const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return activeOrders_[slot];
 }
 
 std::size_t Simulator::testQueueSize() const { return orders_.size(); }

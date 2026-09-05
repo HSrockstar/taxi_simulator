@@ -16,7 +16,8 @@ constexpr int kRebalanceRadius = 10;
 
 enum class DriverState {
     Idle,
-    Serving,
+    EnRoute,
+    OnTrip,
     Rebalancing
 };
 

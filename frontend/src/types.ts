@@ -1,4 +1,4 @@
-export type DriverState = 'IDLE' | 'SERVING' | 'REBALANCING'
+export type DriverState = 'IDLE' | 'EN_ROUTE' | 'ON_TRIP' | 'REBALANCING'
 
 export interface DriverSnapshot {
   id: number

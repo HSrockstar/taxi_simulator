@@ -51,6 +51,7 @@ public:
     void testPushOrder(std::uint64_t id, int x, int y, std::uint64_t createdTick = 0);
     void testTick();
     Driver testDriver(int slot) const;
+    Order testActiveOrder(int slot) const;
     std::size_t testQueueSize() const;
     std::uint64_t testGenerated() const;
     std::uint64_t testMatched() const;
@@ -63,6 +64,7 @@ private:
     void executeTick();
     void resetStateLocked();
     void processDriverTransitionsLocked(std::uint64_t currentTick);
+    void stepTripDriverLocked(int slot, Driver& driver, std::uint64_t currentTick);
     void generateOrderBatchLocked(std::uint64_t currentTick);
     void processOrdersLocked(std::uint64_t currentTick);
     void rebalanceLocked(std::uint64_t currentTick);
@@ -76,6 +78,8 @@ private:
     GridIndex grid_;
     OrderQueue orders_;
     Driver* drivers_ = nullptr;
+    // 撮合成功后的在途订单，按司机槽位索引，行程结束时在此流转为已完成
+    Order* activeOrders_ = nullptr;
     SimulatorParams params_;
     LogRingBuffer logs_;
 

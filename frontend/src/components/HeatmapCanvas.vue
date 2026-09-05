@@ -22,12 +22,20 @@ interface HotCell {
   phase: number
 }
 
-type SpriteKey = 'demand' | 'supply' | 'rebalancing'
+type SpriteKey = 'demand' | 'supply' | 'rebalancing' | 'enroute' | 'ontrip'
 const sprites = new Map<SpriteKey, HTMLCanvasElement>()
 const spritePalettes: Record<SpriteKey, [string, string]> = {
   demand: ['rgba(255, 122, 128, .95)', 'rgba(255, 70, 80, .32)'],
   supply: ['rgba(120, 255, 190, .9)', 'rgba(60, 220, 150, .26)'],
   rebalancing: ['rgba(140, 240, 255, .95)', 'rgba(80, 210, 240, .32)'],
+  enroute: ['rgba(255, 186, 100, .95)', 'rgba(255, 150, 60, .30)'],
+  ontrip: ['rgba(196, 164, 255, .95)', 'rgba(150, 110, 245, .30)'],
+}
+
+// 前往接客 / 行程中两类在途司机的渲染配色
+const tripStyles: Record<'EN_ROUTE' | 'ON_TRIP', { line: string; dot: string; sprite: SpriteKey }> = {
+  EN_ROUTE: { line: 'rgba(255, 186, 100, .5)', dot: '#ffe3b8', sprite: 'enroute' },
+  ON_TRIP: { line: 'rgba(196, 164, 255, .5)', dot: '#e2d6ff', sprite: 'ontrip' },
 }
 
 let hotCells: HotCell[] = []
@@ -265,6 +273,32 @@ function composite(now: number): void {
         context.fill()
       }
 
+      // 前往接客 / 行程中：虚线标出上车点或目的地，司机点随引擎每秒推进
+      for (const driver of snapshot.drivers) {
+        if (driver.state !== 'EN_ROUTE' && driver.state !== 'ON_TRIP') continue
+        const style = tripStyles[driver.state]
+        const px = (driver.x / 1000) * layerSize
+        const py = (driver.y / 1000) * layerSize
+        const tx = (driver.targetX / 1000) * layerSize
+        const ty = (driver.targetY / 1000) * layerSize
+        context.setLineDash([cell * 0.7, cell * 0.55])
+        context.strokeStyle = style.line
+        context.lineWidth = Math.max(1, cell * 0.1)
+        context.beginPath()
+        context.moveTo(px, py)
+        context.lineTo(tx, ty)
+        context.stroke()
+        context.setLineDash([])
+        const glowRadius = cell * 1.4
+        context.globalAlpha = 0.85
+        context.drawImage(spriteFor(style.sprite), px - glowRadius, py - glowRadius, glowRadius * 2, glowRadius * 2)
+        context.globalAlpha = 1
+        context.beginPath()
+        context.arc(px, py, cell * 0.26, 0, Math.PI * 2)
+        context.fillStyle = style.dot
+        context.fill()
+      }
+
       for (const driver of snapshot.drivers) {
         if (driver.state !== 'IDLE') continue
         const px = (driver.x / 1000) * layerSize
@@ -360,12 +394,14 @@ onBeforeUnmount(() => {
     <div class="panel-heading">
       <div>
         <h2>城市供需热力图</h2>
-        <p class="heading-description">红色代表订单积压，绿色代表运力富余，红框为达到失衡阈值的警报热点区，青色路径为调度流向。</p>
+        <p class="heading-description">红色代表订单积压，绿色代表运力富余，红框为达到失衡阈值的警报热点区，青色路径为调度流向，橙色虚线为前往接客，紫色虚线为行程中。</p>
       </div>
       <div class="map-legend" aria-label="热力图图例">
         <span class="data-chip chip-demand"><i></i>需求缺口</span>
         <span class="data-chip chip-supply"><i></i>运力富余</span>
         <span class="data-chip chip-alert"><i></i>警报热点 ≥ <b>{{ snapshot?.params.imbalanceThreshold ?? 2 }}</b></span>
+        <span class="data-chip chip-enroute"><i></i>前往接客</span>
+        <span class="data-chip chip-ontrip"><i></i>行程中</span>
       </div>
     </div>
     <div class="map-frame">

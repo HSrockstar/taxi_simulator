@@ -26,6 +26,12 @@ const tickText = computed(() => {
   return `T+${String(tick).padStart(3, '0')}s`
 })
 
+function formatTotalMatchTime(micros: number): string {
+  if (micros >= 1_000_000) return `${(micros / 1_000_000).toFixed(2)} s`
+  if (micros >= 1_000) return `${(micros / 1_000).toFixed(1)} ms`
+  return `${Math.round(micros)} µs`
+}
+
 function addHistory(data: DashboardSnapshot): void {
   const lastPoint = history.value.at(-1)
   if (lastPoint?.tick === data.tick) return
@@ -134,6 +140,7 @@ async function control(action: 'pause' | 'resume' | 'reset'): Promise<void> {
             <MetricCard label="成功派单" :value="metrics?.matched ?? 0" suffix="累计订单" tone="cyan" />
             <MetricCard label="超时取消" :value="metrics?.cancelled ?? 0" suffix="累计订单" tone="red" />
             <MetricCard label="平均撮合" :value="(metrics?.averageMatchMicros ?? 0).toFixed(1)" suffix="微秒" tone="cyan" />
+            <MetricCard label="总撮合耗时" :value="formatTotalMatchTime(metrics?.totalMatchMicros ?? 0)" suffix="累计撮合" tone="cyan" />
             <MetricCard label="完成行程" :value="metrics?.completed ?? 0" suffix="司机已回归" tone="green" />
           </div>
           <div class="controls">

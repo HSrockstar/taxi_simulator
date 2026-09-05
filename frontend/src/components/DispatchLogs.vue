@@ -8,6 +8,8 @@ const visibleLogs = computed(() => props.logs.slice(-50))
 
 function classFor(message: string): string {
   if (message.includes('派单成功')) return 'log-success'
+  if (message.includes('行程开始')) return 'log-pickup'
+  if (message.includes('行程完成')) return 'log-complete'
   if (message.includes('订单取消')) return 'log-cancel'
   if (message.includes('运力调度')) return 'log-dispatch'
   return 'log-system'
