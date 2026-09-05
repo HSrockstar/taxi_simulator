@@ -24,6 +24,16 @@ export interface LogEntry {
   message: string
 }
 
+export interface ParamsSnapshot {
+  driverCount: number
+  orderRateMin: number
+  orderRateMax: number
+  matchRadius: number
+  rebalanceRadius: number
+  imbalanceThreshold: number
+  orderTimeout: number
+}
+
 export interface DashboardSnapshot {
   tick: number
   paused: boolean
@@ -32,6 +42,7 @@ export interface DashboardSnapshot {
   idle: number[]
   drivers: DriverSnapshot[]
   metrics: MetricsSnapshot
+  params: ParamsSnapshot
   logs: LogEntry[]
 }
 

@@ -212,6 +212,65 @@ void testDeterminism() {
           "相同种子下订单生成与撮合结果完全可复现");
 }
 
+void testDynamicParams() {
+    taxi::Simulator simulator(2026);
+    simulator.testClearState();
+
+    taxi::SimulatorParams params;
+    params.orderTimeout = 2;
+    check(simulator.updateParams(params), "合法参数更新被接受");
+    simulator.testPushOrder(1, 500, 500);
+    simulator.testTick();
+    simulator.testTick();
+    check(simulator.testCancelled() == 1, "超时时间调整为2秒后订单按新值取消");
+
+    params = taxi::SimulatorParams{};
+    params.matchRadius = 20;
+    simulator.updateParams(params);
+    simulator.testClearState();
+    simulator.testAddDriver(90, 7, 700, 500, 4.0);
+    simulator.testPushOrder(2, 500, 500);
+    simulator.testTick();
+    check(simulator.testMatched() == 1, "撮合半径扩大到20格后200米外司机参与匹配");
+
+    params = taxi::SimulatorParams{};
+    params.driverCount = 150;
+    check(simulator.updateParams(params) &&
+          simulator.snapshotJson().find("\"driverCount\":150") != std::string::npos &&
+          simulator.snapshotJson().find("\"id\":150,") != std::string::npos,
+          "司机数热调整为150后运力扩容");
+    params.driverCount = 80;
+    check(simulator.updateParams(params) &&
+          simulator.snapshotJson().find("\"driverCount\":80") != std::string::npos &&
+          simulator.snapshotJson().find("\"id\":150") == std::string::npos,
+          "司机数缩减到80后多余司机移除");
+
+    params = taxi::SimulatorParams{};
+    params.imbalanceThreshold = 20;
+    simulator.updateParams(params);
+    simulator.testClearState();
+    simulator.testAddDriver(0, 10, 255, 205, 4.8);
+    simulator.testPushOrder(10, 205, 205);
+    simulator.testPushOrder(11, 205, 205);
+    simulator.testPushOrder(12, 205, 205);
+    simulator.testTick();
+    check(simulator.testDriver(0).state == taxi::DriverState::Idle,
+          "失衡阈值调高到20后不再触发调度");
+    params.imbalanceThreshold = 2;
+    simulator.updateParams(params);
+    simulator.testTick();
+    check(simulator.testDriver(0).state == taxi::DriverState::Rebalancing,
+          "失衡阈值回调为2后恢复调度");
+
+    taxi::SimulatorParams invalid;
+    invalid.driverCount = 5;
+    check(!simulator.updateParams(invalid), "司机数越界被拒绝");
+    invalid = taxi::SimulatorParams{};
+    invalid.orderRateMin = 8;
+    invalid.orderRateMax = 3;
+    check(!simulator.updateParams(invalid), "订单率下限大于上限被拒绝");
+}
+
 void testHttpServer() {
     constexpr std::uint16_t port = 18081;
     taxi::Simulator simulator(77);
@@ -258,6 +317,7 @@ int main() {
     testMinHeap();
     testSimulatorAlgorithms();
     testDeterminism();
+    testDynamicParams();
     testHttpServer();
     std::cout << "\n测试完成：通过 " << passed << "，失败 " << failed << '\n';
     return failed == 0 ? 0 : 1;

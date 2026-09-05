@@ -19,12 +19,14 @@ constexpr int kHotspotOrigins[3][2] = {
 
 Simulator::Simulator(std::uint32_t seed)
     : seed_(seed), schedulerRandom_(seed ^ 0x9E3779B9U) {
+    drivers_ = new Driver[kMaxDriverCount];
     std::lock_guard<std::mutex> lock(stateMutex_);
     resetStateLocked();
 }
 
 Simulator::~Simulator() {
     stop();
+    delete[] drivers_;
 }
 
 void Simulator::start() {
@@ -121,20 +123,68 @@ void Simulator::resetStateLocked() {
     std::mt19937 initialRandom(seed_);
     std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
     std::uniform_real_distribution<double> rating(3.5, 5.0);
-    for (int index = 0; index < kDriverCount; ++index) {
+    for (int index = 0; index < kMaxDriverCount; ++index) {
         drivers_[index] = Driver{};
-        drivers_[index].id = index + 1;
-        drivers_[index].x = coordinate(initialRandom);
-        drivers_[index].y = coordinate(initialRandom);
-        drivers_[index].rating = rating(initialRandom);
-        drivers_[index].state = DriverState::Idle;
-        grid_.addDriver(&drivers_[index]);
     }
-    logs_.push("[系统] 已初始化 100 名空闲司机，模拟时间归零");
+    for (int index = 0; index < params_.driverCount; ++index) {
+        Driver& driver = drivers_[index];
+        driver.id = index + 1;
+        driver.x = coordinate(initialRandom);
+        driver.y = coordinate(initialRandom);
+        driver.rating = rating(initialRandom);
+        driver.state = DriverState::Idle;
+        grid_.addDriver(&driver);
+    }
+    logs_.push("[系统] 已初始化空闲司机，模拟时间归零");
+}
+
+void Simulator::applyFleetChangeLocked(int previousCount, int newCount) {
+    if (newCount > previousCount) {
+        std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
+        std::uniform_real_distribution<double> rating(3.5, 5.0);
+        for (int index = previousCount; index < newCount; ++index) {
+            Driver& driver = drivers_[index];
+            driver = Driver{};
+            driver.id = index + 1;
+            driver.x = coordinate(schedulerRandom_);
+            driver.y = coordinate(schedulerRandom_);
+            driver.rating = rating(schedulerRandom_);
+            driver.state = DriverState::Idle;
+            grid_.addDriver(&driver);
+        }
+        return;
+    }
+    for (int index = previousCount - 1; index >= newCount; --index) {
+        grid_.removeDriver(&drivers_[index]);
+        drivers_[index] = Driver{};
+    }
+}
+
+bool Simulator::updateParams(const SimulatorParams& params) {
+    if (!SimulatorParams::valid(params)) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    const int previousCount = params_.driverCount;
+    params_ = params;
+    if (params.driverCount != previousCount) {
+        applyFleetChangeLocked(previousCount, params.driverCount);
+    }
+
+    std::ostringstream message;
+    message << "[系统] 参数更新：司机 " << params.driverCount
+            << " · 订单率 " << params.orderRateMin << '-' << params.orderRateMax
+            << " · 撮合半径 " << params.matchRadius
+            << " · 调度半径 " << params.rebalanceRadius
+            << " · 失衡阈值 " << params.imbalanceThreshold
+            << " · 超时 " << params.orderTimeout << "秒";
+    logs_.push(message.str());
+    return true;
 }
 
 void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
-    for (Driver& driver : drivers_) {
+    for (int index = 0; index < params_.driverCount; ++index) {
+        Driver& driver = drivers_[index];
         if (driver.state == DriverState::Idle || driver.readyTick > currentTick) {
             continue;
         }
@@ -152,7 +202,7 @@ void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
 }
 
 void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
-    std::uniform_int_distribution<int> countDistribution(5, 10);
+    std::uniform_int_distribution<int> countDistribution(params_.orderRateMin, params_.orderRateMax);
     std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
     std::uniform_int_distribution<int> hotspotOffset(0, 29);
     std::uniform_int_distribution<int> probability(1, 100);
@@ -193,12 +243,12 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
             order.countedInGrid = true;
         }
 
-        if (currentTick >= order.createdTick + 10) {
+        if (currentTick >= order.createdTick + static_cast<std::uint64_t>(params_.orderTimeout)) {
             --orderCell.pendingCount;
             order.state = OrderState::Cancelled;
             ++cancelled_;
             std::ostringstream message;
-            message << "[订单取消] 订单#" << order.id << " 等待超过10秒";
+            message << "[订单取消] 订单#" << order.id << " 等待超过" << params_.orderTimeout << "秒";
             logs_.push(message.str());
             continue;
         }
@@ -244,7 +294,7 @@ Driver* Simulator::findBestDriverLocked(const Order& order, double& distance, do
     const int centerY = GridIndex::coordinateToCell(order.y);
     MinHeap candidates;
 
-    for (int radius = 0; radius <= kDirectMatchRadius; ++radius) {
+    for (int radius = 0; radius <= params_.matchRadius; ++radius) {
         for (int offsetY = -radius; offsetY <= radius; ++offsetY) {
             for (int offsetX = -radius; offsetX <= radius; ++offsetX) {
                 if (std::max(std::abs(offsetX), std::abs(offsetY)) != radius) {
@@ -286,11 +336,11 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
         for (int targetX = 0; targetX < kGridSide; ++targetX) {
             GridCell& target = grid_.cell(targetX, targetY);
             int imbalance = target.pendingCount - target.idleCount;
-            if (imbalance < 2) {
+            if (imbalance < params_.imbalanceThreshold) {
                 continue;
             }
             int moved = 0;
-            while (imbalance >= 2 && moved < 2) {
+            while (imbalance >= params_.imbalanceThreshold && moved < 2) {
                 Driver* donor = findDonorDriverLocked(targetX, targetY);
                 if (donor == nullptr) {
                     break;
@@ -314,7 +364,7 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
 }
 
 Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
-    for (int radius = 1; radius <= kRebalanceRadius; ++radius) {
+    for (int radius = 1; radius <= params_.rebalanceRadius; ++radius) {
         GridCell* bestCell = nullptr;
         int bestSurplus = 0;
         for (int offsetY = -radius; offsetY <= radius; ++offsetY) {
@@ -356,6 +406,24 @@ StreamToken Simulator::streamToken() const {
     return StreamToken{tick_.load(), resetEpoch_.load(), logs_.lastSequence(), paused_.load()};
 }
 
+void Simulator::appendParamsJson(std::ostringstream& output) const {
+    output << "{\"driverCount\":" << params_.driverCount
+           << ",\"orderRateMin\":" << params_.orderRateMin
+           << ",\"orderRateMax\":" << params_.orderRateMax
+           << ",\"matchRadius\":" << params_.matchRadius
+           << ",\"rebalanceRadius\":" << params_.rebalanceRadius
+           << ",\"imbalanceThreshold\":" << params_.imbalanceThreshold
+           << ",\"orderTimeout\":" << params_.orderTimeout
+           << '}';
+}
+
+std::string Simulator::paramsJson() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    std::ostringstream output;
+    appendParamsJson(output);
+    return output.str();
+}
+
 std::string Simulator::snapshotJson() const {
     std::lock_guard<std::mutex> lock(stateMutex_);
     std::ostringstream output;
@@ -381,7 +449,7 @@ std::string Simulator::snapshotJson() const {
         output << grid_.cellByIndex(index).idleCount;
     }
     output << "],\"drivers\":[";
-    for (int index = 0; index < kDriverCount; ++index) {
+    for (int index = 0; index < params_.driverCount; ++index) {
         if (index > 0) output << ',';
         const Driver& driver = drivers_[index];
         output << "{\"id\":" << driver.id
@@ -398,7 +466,9 @@ std::string Simulator::snapshotJson() const {
            << ",\"successRate\":" << std::fixed << std::setprecision(2) << successRate
            << ",\"totalMatchMicros\":" << totalMatchMicros_
            << ",\"averageMatchMicros\":" << std::fixed << std::setprecision(2) << averageMicros
-           << "},\"logs\":";
+           << "},\"params\":";
+    appendParamsJson(output);
+    output << ",\"logs\":";
     logs_.appendRecentJson(output, 50);
     output << '}';
     return output.str();
@@ -414,8 +484,8 @@ void Simulator::testClearState() {
     generated_.store(0);
     matched_ = cancelled_ = completed_ = matchAttempts_ = totalMatchMicros_ = 0;
     autoGenerate_ = false;
-    for (Driver& driver : drivers_) {
-        driver = Driver{};
+    for (int index = 0; index < kMaxDriverCount; ++index) {
+        drivers_[index] = Driver{};
     }
 }
 

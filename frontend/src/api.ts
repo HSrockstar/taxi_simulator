@@ -1,4 +1,4 @@
-import type { DashboardSnapshot } from './types'
+import type { DashboardSnapshot, ParamsSnapshot } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: 'no-store', ...options })
@@ -29,4 +29,13 @@ export function openSnapshotStream(handlers: SnapshotStreamHandlers): EventSourc
 
 export function controlSimulation(action: 'pause' | 'resume' | 'reset'): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/api/control/${action}`, { method: 'POST' })
+}
+
+export async function updateParams(params: ParamsSnapshot): Promise<ParamsSnapshot> {
+  const response = await request<{ ok: boolean; params: ParamsSnapshot }>('/api/params', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  return response.params
 }

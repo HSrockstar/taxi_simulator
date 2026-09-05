@@ -17,6 +17,66 @@ constexpr int kStreamIntervalMs = 250;
 constexpr int kStreamPollMs = 60;
 constexpr int kStreamPingSeconds = 10;
 
+// 请求头大小写不敏感地提取 Content-Length
+int parseContentLength(const std::string& headers) {
+    std::string lowered;
+    lowered.reserve(headers.size());
+    for (const char character : headers) {
+        lowered += static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    }
+    const std::size_t position = lowered.find("content-length:");
+    if (position == std::string::npos) {
+        return 0;
+    }
+    std::size_t index = position + 15;
+    while (index < lowered.size() && std::isspace(static_cast<unsigned char>(lowered[index]))) {
+        ++index;
+    }
+    int value = 0;
+    while (index < lowered.size() && std::isdigit(static_cast<unsigned char>(lowered[index]))) {
+        value = value * 10 + (lowered[index] - '0');
+        if (value > static_cast<int>(kMaxRequestBytes)) {
+            return static_cast<int>(kMaxRequestBytes);
+        }
+        ++index;
+    }
+    return value;
+}
+
+// 从扁平 JSON 对象中提取整数字段（本项目请求体只含简单键值对）
+bool extractIntField(const std::string& json, const char* key, int& value) {
+    const std::string pattern = std::string("\"") + key + "\"";
+    const std::size_t keyPosition = json.find(pattern);
+    if (keyPosition == std::string::npos) {
+        return false;
+    }
+    const std::size_t colon = json.find(':', keyPosition + pattern.size());
+    if (colon == std::string::npos) {
+        return false;
+    }
+    std::size_t index = colon + 1;
+    while (index < json.size() && std::isspace(static_cast<unsigned char>(json[index]))) {
+        ++index;
+    }
+    const bool negative = index < json.size() && json[index] == '-';
+    if (negative) {
+        ++index;
+    }
+    if (index >= json.size() || !std::isdigit(static_cast<unsigned char>(json[index]))) {
+        return false;
+    }
+    long parsed = 0;
+    while (index < json.size() && std::isdigit(static_cast<unsigned char>(json[index]))) {
+        parsed = parsed * 10 + (json[index] - '0');
+        if (parsed > 1000000) {
+            return false;
+        }
+        ++index;
+    }
+    value = static_cast<int>(negative ? -parsed : parsed);
+    return true;
+}
+
 bool isSafeStaticPath(const std::string& path) {
     if (path.empty() || path.front() != '/' || path.find("..") != std::string::npos ||
         path.find('\\') != std::string::npos) {
@@ -172,6 +232,20 @@ std::string HttpServer::readRequest(std::uintptr_t rawClientSocket) const {
         }
         request.append(buffer, static_cast<std::size_t>(received));
     }
+    const std::size_t headerEnd = request.find("\r\n\r\n");
+    if (headerEnd == std::string::npos) {
+        return {};
+    }
+    const int contentLength = parseContentLength(request.substr(0, headerEnd));
+    while (contentLength > 0 &&
+           request.size() < headerEnd + 4 + static_cast<std::size_t>(contentLength) &&
+           request.size() < kMaxRequestBytes) {
+        const int received = recv(client, buffer, static_cast<int>(sizeof(buffer)), 0);
+        if (received <= 0) {
+            return {};
+        }
+        request.append(buffer, static_cast<std::size_t>(received));
+    }
     return request;
 }
 
@@ -206,6 +280,24 @@ void HttpServer::handleClient(std::uintptr_t rawClientSocket) {
     } else if (method == "POST" && path == "/api/control/reset") {
         simulator_.requestReset();
         response = buildResponse(202, "Accepted", "application/json; charset=utf-8", "{\"ok\":true}");
+    } else if (method == "POST" && path == "/api/params") {
+        const std::size_t bodyStart = request.find("\r\n\r\n");
+        const std::string body = bodyStart == std::string::npos ? "" : request.substr(bodyStart + 4);
+        SimulatorParams params;
+        const bool applied =
+            extractIntField(body, "driverCount", params.driverCount) &&
+            extractIntField(body, "orderRateMin", params.orderRateMin) &&
+            extractIntField(body, "orderRateMax", params.orderRateMax) &&
+            extractIntField(body, "matchRadius", params.matchRadius) &&
+            extractIntField(body, "rebalanceRadius", params.rebalanceRadius) &&
+            extractIntField(body, "imbalanceThreshold", params.imbalanceThreshold) &&
+            extractIntField(body, "orderTimeout", params.orderTimeout) &&
+            simulator_.updateParams(params);
+        response = applied
+            ? buildResponse(200, "OK", "application/json; charset=utf-8",
+                            "{\"ok\":true,\"params\":" + simulator_.paramsJson() + "}")
+            : buildResponse(400, "Bad Request", "application/json; charset=utf-8",
+                            "{\"ok\":false,\"error\":\"参数无效\"}");
     } else if (method == "GET") {
         std::string contentType;
         const std::string body = readStaticFile(path, contentType);

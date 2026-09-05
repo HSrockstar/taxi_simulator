@@ -4,6 +4,7 @@ import { controlSimulation, openSnapshotStream } from './api'
 import DispatchLogs from './components/DispatchLogs.vue'
 import HeatmapCanvas from './components/HeatmapCanvas.vue'
 import MetricCard from './components/MetricCard.vue'
+import ParamsPanel from './components/ParamsPanel.vue'
 import TrendChart from './components/TrendChart.vue'
 import type { DashboardSnapshot, TrendPoint } from './types'
 
@@ -115,6 +116,7 @@ async function control(action: 'pause' | 'resume' | 'reset'): Promise<void> {
           </div>
         </section>
 
+        <ParamsPanel :params="snapshot?.params ?? null" />
         <TrendChart :history="history" />
         <DispatchLogs :logs="snapshot?.logs ?? []" />
       </aside>

@@ -10,6 +10,7 @@ constexpr int kGridSide = 100;
 constexpr int kCellSize = kMapSize / kGridSide;
 constexpr int kGridCount = kGridSide * kGridSide;
 constexpr int kDriverCount = 100;
+constexpr int kMaxDriverCount = 500;
 constexpr int kDirectMatchRadius = 3;
 constexpr int kRebalanceRadius = 10;
 
@@ -54,6 +55,26 @@ struct MatchCandidate {
     Driver* driver = nullptr;
     double score = 0.0;
     double distance = 0.0;
+};
+
+struct SimulatorParams {
+    int driverCount = kDriverCount;
+    int orderRateMin = 5;
+    int orderRateMax = 10;
+    int matchRadius = kDirectMatchRadius;
+    int rebalanceRadius = kRebalanceRadius;
+    int imbalanceThreshold = 2;
+    int orderTimeout = 10;
+
+    static bool valid(const SimulatorParams& params) {
+        return params.driverCount >= 10 && params.driverCount <= kMaxDriverCount
+            && params.orderRateMin >= 0 && params.orderRateMin <= params.orderRateMax
+            && params.orderRateMax <= 50
+            && params.matchRadius >= 1 && params.matchRadius <= 20
+            && params.rebalanceRadius >= 1 && params.rebalanceRadius <= 30
+            && params.imbalanceThreshold >= 1 && params.imbalanceThreshold <= 20
+            && params.orderTimeout >= 1 && params.orderTimeout <= 60;
+    }
 };
 
 inline bool candidateLess(const MatchCandidate& left, const MatchCandidate& right) {

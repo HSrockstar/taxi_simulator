@@ -40,7 +40,9 @@ public:
 
     bool paused() const;
     std::string snapshotJson() const;
+    std::string paramsJson() const;
     StreamToken streamToken() const;
+    bool updateParams(const SimulatorParams& params);
 
 #ifdef TAXI_TESTING
     void testClearState();
@@ -64,6 +66,8 @@ private:
     void generateOrderBatchLocked(std::uint64_t currentTick);
     void processOrdersLocked(std::uint64_t currentTick);
     void rebalanceLocked(std::uint64_t currentTick);
+    void applyFleetChangeLocked(int previousCount, int newCount);
+    void appendParamsJson(std::ostringstream& output) const;
     Driver* findBestDriverLocked(const Order& order, double& distance, double& score);
     Driver* findDonorDriverLocked(int targetCellX, int targetCellY);
     static const char* driverStateName(DriverState state);
@@ -71,7 +75,8 @@ private:
     std::uint32_t seed_;
     GridIndex grid_;
     OrderQueue orders_;
-    Driver drivers_[kDriverCount];
+    Driver* drivers_ = nullptr;
+    SimulatorParams params_;
     LogRingBuffer logs_;
 
     mutable std::mutex stateMutex_;
