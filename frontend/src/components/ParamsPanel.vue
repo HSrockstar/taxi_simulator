@@ -15,6 +15,25 @@ const DEFAULTS: ParamsSnapshot = {
   orderTimeout: 10,
 }
 
+interface FieldConfig {
+  key: keyof ParamsSnapshot
+  label: string
+  hint: string
+  min: number
+  max: number
+  step: number
+}
+
+const FIELDS: FieldConfig[] = [
+  { key: 'driverCount', label: '司机数量', hint: '10 – 500', min: 10, max: 500, step: 10 },
+  { key: 'orderRateMin', label: '订单率下限', hint: '单/秒', min: 0, max: 50, step: 1 },
+  { key: 'orderRateMax', label: '订单率上限', hint: '单/秒', min: 0, max: 50, step: 1 },
+  { key: 'matchRadius', label: '撮合半径', hint: '格', min: 1, max: 20, step: 1 },
+  { key: 'rebalanceRadius', label: '调度半径', hint: '格', min: 1, max: 30, step: 1 },
+  { key: 'imbalanceThreshold', label: '失衡阈值', hint: '单差', min: 1, max: 20, step: 1 },
+  { key: 'orderTimeout', label: '订单超时', hint: '秒', min: 1, max: 60, step: 1 },
+]
+
 const draft = reactive<ParamsSnapshot>({ ...DEFAULTS })
 const serverParams = ref<ParamsSnapshot | null>(null)
 const applying = ref(false)
@@ -44,6 +63,12 @@ watch(() => props.params, (value) => {
 function coerce(value: number | string): number {
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? Math.round(parsed) : NaN
+}
+
+function bump(field: FieldConfig, direction: 1 | -1): void {
+  const current = Number(draft[field.key])
+  const base = Number.isFinite(current) ? current : DEFAULTS[field.key]
+  draft[field.key] = Math.min(field.max, Math.max(field.min, base + direction * field.step))
 }
 
 async function apply(): Promise<void> {
@@ -82,20 +107,24 @@ function resetDefaults(): void {
   <section class="panel params-panel">
     <div class="panel-heading compact-heading">
       <div>
-        <p class="section-kicker">ENGINE TUNING</p>
         <h2>引擎参数调节</h2>
-        <p class="heading-description">保存后立即生效，作用于下一个模拟秒。</p>
+        <p class="heading-description">保存后立即生效，作用于下一个模拟秒</p>
       </div>
       <span v-if="dirty" class="dirty-badge">未保存</span>
     </div>
     <div class="params-grid">
-      <label class="param-field"><span>司机数 10-500</span><input v-model.number="draft.driverCount" type="number" min="10" max="500" step="10" /></label>
-      <label class="param-field"><span>订单率下限/秒</span><input v-model.number="draft.orderRateMin" type="number" min="0" max="50" /></label>
-      <label class="param-field"><span>订单率上限/秒</span><input v-model.number="draft.orderRateMax" type="number" min="0" max="50" /></label>
-      <label class="param-field"><span>撮合半径 (格)</span><input v-model.number="draft.matchRadius" type="number" min="1" max="20" /></label>
-      <label class="param-field"><span>调度半径 (格)</span><input v-model.number="draft.rebalanceRadius" type="number" min="1" max="30" /></label>
-      <label class="param-field"><span>失衡阈值</span><input v-model.number="draft.imbalanceThreshold" type="number" min="1" max="20" /></label>
-      <label class="param-field"><span>超时时间 (秒)</span><input v-model.number="draft.orderTimeout" type="number" min="1" max="60" /></label>
+      <label v-for="field in FIELDS" :key="field.key" class="param-field">
+        <span class="param-label"><span>{{ field.label }}</span><small>{{ field.hint }}</small></span>
+        <span class="stepper">
+          <input v-model.number="draft[field.key]" type="number" :min="field.min" :max="field.max" :step="field.step" />
+          <button type="button" class="step-btn" :aria-label="`减小${field.label}`" @click.prevent="bump(field, -1)">
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+          </button>
+          <button type="button" class="step-btn" :aria-label="`增大${field.label}`" @click.prevent="bump(field, 1)">
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.5v7M1.5 5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+          </button>
+        </span>
+      </label>
     </div>
     <p v-if="errorMessage" class="param-error">{{ errorMessage }}</p>
     <div class="param-actions">

@@ -29,15 +29,17 @@ watch(visibleLogs, async () => {
   <section class="panel logs-panel">
     <div class="panel-heading compact-heading">
       <div>
-        <p class="section-kicker">ENGINE EVENTS</p>
         <h2>实时派单日志</h2>
+        <p class="heading-description">撮合双方、距离与耗时逐秒滚动</p>
       </div>
       <span class="log-count">{{ visibleLogs.length }} 条</span>
     </div>
     <div ref="list" class="log-list">
       <p v-if="visibleLogs.length === 0" class="log-empty">等待引擎事件……</p>
-      <p v-for="entry in visibleLogs" :key="entry.sequence" :class="classFor(entry.message)">
-        <span>#{{ entry.sequence }}</span>{{ entry.message }}
+      <p v-for="entry in visibleLogs" :key="entry.sequence" class="log-row" :class="classFor(entry.message)">
+        <span class="log-dot" aria-hidden="true"></span>
+        <span class="log-seq">#{{ entry.sequence }}</span>
+        <span class="log-msg">{{ entry.message }}</span>
       </p>
     </div>
   </section>
