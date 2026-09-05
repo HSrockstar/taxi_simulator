@@ -364,9 +364,13 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
 }
 
 Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
+    // 与撮合同款评分公式（Score = 距离 - 评分）：只从富余网格取供体，
+    // 半径内所有候选压入最小堆，堆顶即距离最近、评分最高的司机
+    const int centerX = targetCellX * kCellSize + kCellSize / 2;
+    const int centerY = targetCellY * kCellSize + kCellSize / 2;
+    MinHeap candidates;
+
     for (int radius = 1; radius <= params_.rebalanceRadius; ++radius) {
-        GridCell* bestCell = nullptr;
-        int bestSurplus = 0;
         for (int offsetY = -radius; offsetY <= radius; ++offsetY) {
             for (int offsetX = -radius; offsetX <= radius; ++offsetX) {
                 if (std::max(std::abs(offsetX), std::abs(offsetY)) != radius) {
@@ -378,18 +382,23 @@ Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
                     continue;
                 }
                 GridCell& candidate = grid_.cell(cellX, cellY);
-                const int surplus = candidate.idleCount - candidate.pendingCount;
-                if (surplus > bestSurplus) {
-                    bestSurplus = surplus;
-                    bestCell = &candidate;
+                if (candidate.idleCount - candidate.pendingCount <= 0) {
+                    continue;
+                }
+                for (Driver* current = candidate.head; current != nullptr; current = current->next) {
+                    const double deltaX = static_cast<double>(current->x - centerX);
+                    const double deltaY = static_cast<double>(current->y - centerY);
+                    const double distance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
+                    candidates.push(MatchCandidate{current, distance - current->rating, distance});
                 }
             }
         }
-        if (bestCell != nullptr) {
-            return bestCell->head;
-        }
     }
-    return nullptr;
+
+    if (candidates.empty()) {
+        return nullptr;
+    }
+    return candidates.pop().driver;
 }
 
 const char* Simulator::driverStateName(DriverState state) {
@@ -455,6 +464,8 @@ std::string Simulator::snapshotJson() const {
         output << "{\"id\":" << driver.id
                << ",\"x\":" << driver.x
                << ",\"y\":" << driver.y
+               << ",\"targetX\":" << driver.targetX
+               << ",\"targetY\":" << driver.targetY
                << ",\"rating\":" << std::fixed << std::setprecision(1) << driver.rating
                << ",\"state\":\"" << driverStateName(driver.state) << "\"}";
     }

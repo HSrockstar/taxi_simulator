@@ -191,6 +191,21 @@ void testSimulatorAlgorithms() {
     check(simulator.testMatched() == 1 && simulator.testQueueSize() == 2,
           "调度到达后的司机参与下一轮撮合");
 
+    // 供体选择与撮合一致：距离 40 米评分 4.9 的司机堆顶胜出，
+    // 距离 50 米评分 4.0 的司机留在原地（2 个订单只触发一次调度）
+    simulator.testClearState();
+    simulator.testAddDriver(1, 21, 255, 205, 4.0);
+    simulator.testAddDriver(2, 22, 245, 205, 4.9);
+    simulator.testPushOrder(20, 205, 205);
+    simulator.testPushOrder(21, 205, 205);
+    simulator.testTick();
+    check(simulator.testDriver(2).state == taxi::DriverState::Rebalancing &&
+          simulator.testDriver(1).state == taxi::DriverState::Idle,
+          "供体按撮合同款最小堆挑选最优司机");
+    check(simulator.snapshotJson().find("\"targetX\":") != std::string::npos &&
+          simulator.snapshotJson().find("\"targetY\":") != std::string::npos,
+          "快照包含调度目标坐标供流向可视化");
+
     const std::string snapshot = simulator.snapshotJson();
     check(snapshot.find("\"pending\":[") != std::string::npos &&
           snapshot.find("\"idle\":[") != std::string::npos &&

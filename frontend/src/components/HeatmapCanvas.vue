@@ -35,6 +35,39 @@ let layerSize = 0
 let hoverCell: { x: number; y: number } | null = null
 let rafId = 0
 
+interface Flow {
+  fromX: number
+  fromY: number
+  toX: number
+  toY: number
+  startedAt: number
+}
+
+// 后端调度行程固定为 2 个 tick（约 2 秒），流向动画与其同步
+const kFlowDurationMs = 2000
+const flows = new Map<number, Flow>()
+
+function syncFlows(snapshot: DashboardSnapshot): void {
+  const now = performance.now()
+  const active = new Set<number>()
+  for (const driver of snapshot.drivers) {
+    if (driver.state !== 'REBALANCING') continue
+    active.add(driver.id)
+    if (!flows.has(driver.id)) {
+      flows.set(driver.id, {
+        fromX: driver.x,
+        fromY: driver.y,
+        toX: driver.targetX,
+        toY: driver.targetY,
+        startedAt: now,
+      })
+    }
+  }
+  for (const id of [...flows.keys()]) {
+    if (!active.has(id)) flows.delete(id)
+  }
+}
+
 function hslToRgb(hue: number, saturation: number, lightness: number): [number, number, number] {
   const s = saturation / 100
   const l = lightness / 100
@@ -179,18 +212,55 @@ function composite(now: number): void {
       context.globalAlpha = 1
       context.globalCompositeOperation = 'source-over'
 
-      for (const driver of snapshot.drivers) {
-        if (driver.state === 'SERVING') continue
-        const rebalancing = driver.state === 'REBALANCING'
-        const px = (driver.x / 1000) * layerSize
-        const py = (driver.y / 1000) * layerSize
-        const glowRadius = cell * (rebalancing ? 1.5 : 1)
-        context.globalAlpha = rebalancing ? 0.85 : 0.6
-        context.drawImage(spriteFor(rebalancing ? 'rebalancing' : 'supply'), px - glowRadius, py - glowRadius, glowRadius * 2, glowRadius * 2)
+      // 调度流向：起点到热点格的渐隐路径，司机点沿线移动；
+      // 司机点在这里画，下方静态循环跳过 REBALANCING 避免重复
+      const flowNow = performance.now()
+      for (const [, flow] of flows) {
+        const raw = (flowNow - flow.startedAt) / kFlowDurationMs
+        if (raw >= 1) continue
+        const alpha = Math.sin(raw * Math.PI)
+        const eased = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2
+        const fx = (flow.fromX / 1000) * layerSize
+        const fy = (flow.fromY / 1000) * layerSize
+        const tx = (flow.toX / 1000) * layerSize
+        const ty = (flow.toY / 1000) * layerSize
+
+        context.strokeStyle = `rgba(125, 226, 250, ${(0.5 * alpha).toFixed(3)})`
+        context.lineWidth = Math.max(1, cell * 0.12)
+        context.beginPath()
+        context.moveTo(fx, fy)
+        context.lineTo(tx, ty)
+        context.stroke()
+
+        context.strokeStyle = `rgba(125, 226, 250, ${(0.7 * alpha).toFixed(3)})`
+        context.lineWidth = Math.max(1, cell * 0.1)
+        context.beginPath()
+        context.arc(tx, ty, cell * 0.55, 0, Math.PI * 2)
+        context.stroke()
+
+        const mx = fx + (tx - fx) * eased
+        const my = fy + (ty - fy) * eased
+        const glowRadius = cell * 1.5
+        context.globalAlpha = 0.85 * alpha
+        context.drawImage(spriteFor('rebalancing'), mx - glowRadius, my - glowRadius, glowRadius * 2, glowRadius * 2)
         context.globalAlpha = 1
         context.beginPath()
-        context.arc(px, py, cell * (rebalancing ? 0.3 : 0.22), 0, Math.PI * 2)
-        context.fillStyle = rebalancing ? '#c9f4ff' : '#eafff6'
+        context.arc(mx, my, cell * 0.3, 0, Math.PI * 2)
+        context.fillStyle = '#c9f4ff'
+        context.fill()
+      }
+
+      for (const driver of snapshot.drivers) {
+        if (driver.state !== 'IDLE') continue
+        const px = (driver.x / 1000) * layerSize
+        const py = (driver.y / 1000) * layerSize
+        const glowRadius = cell
+        context.globalAlpha = 0.6
+        context.drawImage(spriteFor('supply'), px - glowRadius, py - glowRadius, glowRadius * 2, glowRadius * 2)
+        context.globalAlpha = 1
+        context.beginPath()
+        context.arc(px, py, cell * 0.22, 0, Math.PI * 2)
+        context.fillStyle = '#eafff6'
         context.fill()
       }
 
@@ -232,6 +302,7 @@ function syncSize(): number {
 function rebuild(): void {
   const snapshot = props.snapshot
   if (!snapshot) return
+  syncFlows(snapshot)
   const size = syncSize()
   if (size) buildBase(snapshot, size)
 }
@@ -274,7 +345,7 @@ onBeforeUnmount(() => {
     <div class="panel-heading">
       <div>
         <h2>城市供需热力图</h2>
-        <p class="heading-description">红色区域存在订单积压，绿色代表运力富余，青色点位为调度中车辆。</p>
+        <p class="heading-description">红色区域存在订单积压，绿色代表运力富余，青色路径为司机调往热点的流向。</p>
       </div>
       <div class="map-legend" aria-label="热力图图例">
         <span class="data-chip chip-demand"><i></i>需求缺口</span>

@@ -4,6 +4,8 @@ export interface DriverSnapshot {
   id: number
   x: number
   y: number
+  targetX: number
+  targetY: number
   rating: number
   state: DriverState
 }
