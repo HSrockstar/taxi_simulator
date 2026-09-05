@@ -14,9 +14,15 @@ function classFor(message: string): string {
 }
 
 watch(visibleLogs, async () => {
+  // watch 在 DOM 更新前触发，此刻测得的"是否在底部"才是用户更新前的状态
+  const element = list.value
+  const nearBottom = !element ||
+    element.scrollHeight - element.scrollTop - element.clientHeight < 40
   await nextTick()
-  if (list.value) list.value.scrollTop = list.value.scrollHeight
-}, { deep: true })
+  if (element && nearBottom) {
+    element.scrollTop = element.scrollHeight
+  }
+})
 </script>
 
 <template>

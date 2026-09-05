@@ -281,6 +281,10 @@ std::size_t LogRingBuffer::size() const {
     return size_;
 }
 
+std::uint64_t LogRingBuffer::lastSequence() const {
+    return nextSequence_;
+}
+
 void LogRingBuffer::appendRecentJson(std::ostringstream& output, std::size_t limit) const {
     const std::size_t count = size_ < limit ? size_ : limit;
     const std::size_t first = (start_ + size_ - count) % kCapacity;

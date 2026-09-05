@@ -104,6 +104,7 @@ public:
     void push(const std::string& message);
     void clear();
     std::size_t size() const;
+    std::uint64_t lastSequence() const;
     void appendRecentJson(std::ostringstream& output, std::size_t limit) const;
 
 private:

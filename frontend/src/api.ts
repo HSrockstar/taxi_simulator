@@ -8,8 +8,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function getSnapshot(signal?: AbortSignal): Promise<DashboardSnapshot> {
-  return request<DashboardSnapshot>('/api/snapshot', { signal })
+export interface SnapshotStreamHandlers {
+  onSnapshot: (data: DashboardSnapshot) => void
+  onStatus: (connected: boolean) => void
+}
+
+export function openSnapshotStream(handlers: SnapshotStreamHandlers): EventSource {
+  const source = new EventSource('/api/stream')
+  source.onopen = () => handlers.onStatus(true)
+  source.onmessage = (event) => {
+    try {
+      handlers.onSnapshot(JSON.parse(event.data as string) as DashboardSnapshot)
+    } catch {
+      // 忽略不完整的数据帧，等待下一帧
+    }
+  }
+  source.onerror = () => handlers.onStatus(false)
+  return source
 }
 
 export function controlSimulation(action: 'pause' | 'resume' | 'reset'): Promise<{ ok: boolean }> {

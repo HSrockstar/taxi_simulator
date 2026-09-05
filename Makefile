@@ -5,6 +5,7 @@ FRONTEND_DIR := frontend
 APP_SOURCES := src/main.cpp src/manual_structures.cpp src/simulator.cpp src/http_server.cpp
 TEST_SOURCES := tests/test_main.cpp src/manual_structures.cpp src/simulator.cpp src/http_server.cpp
 WINDOWS_LIBS := -lws2_32 -lshell32
+LDFLAGS := -static -static-libgcc -static-libstdc++
 
 .PHONY: all frontend test
 
@@ -14,10 +15,10 @@ frontend:
 	$(NPM) --prefix $(FRONTEND_DIR) run build
 
 taxi_simulator.exe: $(APP_SOURCES)
-	$(CXX) $(CXXFLAGS) $(APP_SOURCES) -o $@ $(WINDOWS_LIBS)
+	$(CXX) $(CXXFLAGS) $(APP_SOURCES) -o $@ $(WINDOWS_LIBS) $(LDFLAGS)
 
 taxi_tests.exe: $(TEST_SOURCES)
-	$(CXX) $(CXXFLAGS) -DTAXI_TESTING $(TEST_SOURCES) -o $@ $(WINDOWS_LIBS)
+	$(CXX) $(CXXFLAGS) -DTAXI_TESTING $(TEST_SOURCES) -o $@ $(WINDOWS_LIBS) $(LDFLAGS)
 
 test: frontend taxi_tests.exe
 	./taxi_tests.exe

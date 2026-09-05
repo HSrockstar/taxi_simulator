@@ -12,6 +12,18 @@
 
 namespace taxi {
 
+struct StreamToken {
+    std::uint64_t tick = 0;
+    std::uint64_t epoch = 0;
+    std::uint64_t logSequence = 0;
+    bool paused = false;
+};
+
+inline bool operator!=(const StreamToken& left, const StreamToken& right) {
+    return left.tick != right.tick || left.epoch != right.epoch ||
+           left.logSequence != right.logSequence || left.paused != right.paused;
+}
+
 class Simulator {
 public:
     explicit Simulator(std::uint32_t seed = 20260808U);
@@ -28,30 +40,32 @@ public:
 
     bool paused() const;
     std::string snapshotJson() const;
+    StreamToken streamToken() const;
 
 #ifdef TAXI_TESTING
     void testClearState();
+    void testSetAutoGenerate(bool enabled);
     void testAddDriver(int slot, int id, int x, int y, double rating);
     void testPushOrder(std::uint64_t id, int x, int y, std::uint64_t createdTick = 0);
     void testTick();
     Driver testDriver(int slot) const;
     std::size_t testQueueSize() const;
+    std::uint64_t testGenerated() const;
     std::uint64_t testMatched() const;
     std::uint64_t testCancelled() const;
     std::uint64_t testCompleted() const;
 #endif
 
 private:
-    void producerLoop();
     void schedulerLoop();
     void executeTick();
     void resetStateLocked();
     void processDriverTransitionsLocked(std::uint64_t currentTick);
+    void generateOrderBatchLocked(std::uint64_t currentTick);
     void processOrdersLocked(std::uint64_t currentTick);
     void rebalanceLocked(std::uint64_t currentTick);
     Driver* findBestDriverLocked(const Order& order, double& distance, double& score);
     Driver* findDonorDriverLocked(int targetCellX, int targetCellY);
-    void generateOrderBatch(std::mt19937& random);
     static const char* driverStateName(DriverState state);
 
     std::uint32_t seed_;
@@ -61,10 +75,8 @@ private:
     LogRingBuffer logs_;
 
     mutable std::mutex stateMutex_;
-    std::mutex resetMutex_;
     std::mutex controlMutex_;
     std::condition_variable controlCondition_;
-    std::thread producerThread_;
     std::thread schedulerThread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stopRequested_{false};
@@ -76,6 +88,7 @@ private:
     std::atomic<std::uint64_t> generated_{0};
 
     std::mt19937 schedulerRandom_;
+    bool autoGenerate_ = true;
     std::uint64_t matched_ = 0;
     std::uint64_t cancelled_ = 0;
     std::uint64_t completed_ = 0;

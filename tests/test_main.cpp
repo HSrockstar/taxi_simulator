@@ -52,6 +52,37 @@ std::string httpRequest(std::uint16_t port, const std::string& request) {
     return response;
 }
 
+// SSE 是长连接不主动关闭，改用接收超时读取第一帧数据
+std::string sseFirstPayload(std::uint16_t port) {
+    const SOCKET socketHandle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socketHandle == INVALID_SOCKET) {
+        return {};
+    }
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+    if (connect(socketHandle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
+        closesocket(socketHandle);
+        return {};
+    }
+    const DWORD timeoutMs = 2000;
+    setsockopt(socketHandle, SOL_SOCKET, SO_RCVTIMEO,
+               reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+    const std::string request =
+        "GET /api/stream HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n";
+    send(socketHandle, request.data(), static_cast<int>(request.size()), 0);
+    std::string response;
+    char buffer[8192];
+    while (response.find("data:") == std::string::npos && response.size() < 256 * 1024) {
+        const int count = recv(socketHandle, buffer, static_cast<int>(sizeof(buffer)), 0);
+        if (count <= 0) break;
+        response.append(buffer, static_cast<std::size_t>(count));
+    }
+    closesocket(socketHandle);
+    return response;
+}
+
 void testGridIndex() {
     taxi::GridIndex grid;
     check(taxi::GridIndex::coordinateToCell(0) == 0, "坐标下边界映射");
@@ -167,6 +198,20 @@ void testSimulatorAlgorithms() {
           "快照包含网格数组和全局指标");
 }
 
+void testDeterminism() {
+    taxi::Simulator first(20260808);
+    taxi::Simulator second(20260808);
+    for (int tick = 0; tick < 40; ++tick) {
+        first.testTick();
+        second.testTick();
+    }
+    check(first.testGenerated() == second.testGenerated() &&
+          first.testMatched() == second.testMatched() &&
+          first.testCancelled() == second.testCancelled() &&
+          first.testCompleted() == second.testCompleted(),
+          "相同种子下订单生成与撮合结果完全可复现");
+}
+
 void testHttpServer() {
     constexpr std::uint16_t port = 18081;
     taxi::Simulator simulator(77);
@@ -195,6 +240,12 @@ void testHttpServer() {
         "GET /secret.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     check(missing.find("HTTP/1.1 404 Not Found") != std::string::npos,
           "未授权静态路径返回 404");
+
+    const std::string stream = sseFirstPayload(port);
+    check(stream.find("HTTP/1.1 200 OK") != std::string::npos &&
+          stream.find("text/event-stream") != std::string::npos &&
+          stream.find("data: {\"tick\"") != std::string::npos,
+          "SSE 流式接口推送快照");
     server.stop();
 }
 
@@ -206,6 +257,7 @@ int main() {
     testOrderQueue();
     testMinHeap();
     testSimulatorAlgorithms();
+    testDeterminism();
     testHttpServer();
     std::cout << "\n测试完成：通过 " << passed << "，失败 " << failed << '\n';
     return failed == 0 ? 0 : 1;

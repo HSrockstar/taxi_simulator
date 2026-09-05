@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { controlSimulation, getSnapshot } from './api'
+import { controlSimulation, openSnapshotStream } from './api'
 import DispatchLogs from './components/DispatchLogs.vue'
 import HeatmapCanvas from './components/HeatmapCanvas.vue'
 import MetricCard from './components/MetricCard.vue'
@@ -12,8 +12,7 @@ const history = ref<TrendPoint[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
 const controlling = ref(false)
-let refreshTimer: number | undefined
-let requestController: AbortController | undefined
+let eventSource: EventSource | undefined
 
 const metrics = computed(() => snapshot.value?.metrics)
 const statusText = computed(() => {
@@ -33,23 +32,29 @@ function addHistory(data: DashboardSnapshot): void {
   if (history.value.length > 36) history.value.shift()
 }
 
-async function refresh(): Promise<void> {
-  if (requestController) return
-  requestController = new AbortController()
-  try {
-    const data = await getSnapshot(requestController.signal)
-    snapshot.value = data
-    addHistory(data)
-    errorMessage.value = ''
-  } catch (error) {
-    if (!(error instanceof DOMException && error.name === 'AbortError')) {
-      errorMessage.value = error instanceof Error ? error.message : '无法连接模拟器'
-    }
-  } finally {
-    requestController = undefined
-    loading.value = false
-  }
+function acceptSnapshot(data: DashboardSnapshot): void {
+  snapshot.value = data
+  addHistory(data)
+  loading.value = false
 }
+
+onMounted(() => {
+  eventSource = openSnapshotStream({
+    onSnapshot: (data) => {
+      errorMessage.value = ''
+      acceptSnapshot(data)
+    },
+    onStatus: (connected) => {
+      if (connected) {
+        errorMessage.value = ''
+      } else if (!errorMessage.value) {
+        errorMessage.value = '实时连接已断开，正在自动重连……'
+      }
+    },
+  })
+})
+
+onBeforeUnmount(() => eventSource?.close())
 
 async function control(action: 'pause' | 'resume' | 'reset'): Promise<void> {
   if (controlling.value) return
@@ -57,23 +62,12 @@ async function control(action: 'pause' | 'resume' | 'reset'): Promise<void> {
   try {
     await controlSimulation(action)
     if (action === 'reset') history.value = []
-    window.setTimeout(() => void refresh(), action === 'reset' ? 500 : 100)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '控制请求失败'
   } finally {
     controlling.value = false
   }
 }
-
-onMounted(() => {
-  void refresh()
-  refreshTimer = window.setInterval(() => void refresh(), 500)
-})
-
-onBeforeUnmount(() => {
-  if (refreshTimer) window.clearInterval(refreshTimer)
-  requestController?.abort()
-})
 </script>
 
 <template>

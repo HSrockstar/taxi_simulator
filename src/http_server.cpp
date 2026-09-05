@@ -4,11 +4,18 @@
 #include <ws2tcpip.h>
 
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 namespace taxi {
 namespace {
+
+constexpr std::size_t kMaxRequestBytes = 64 * 1024;
+constexpr int kStreamIntervalMs = 250;
+constexpr int kStreamPollMs = 60;
+constexpr int kStreamPingSeconds = 10;
 
 bool isSafeStaticPath(const std::string& path) {
     if (path.empty() || path.front() != '/' || path.find("..") != std::string::npos ||
@@ -109,6 +116,11 @@ void HttpServer::stop() {
     if (thread_.joinable()) {
         thread_.join();
     }
+    // 等待连接线程退出（SSE 线程每个轮询周期都会检查 running_）
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (activeConnections_.load() > 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
     WSACleanup();
 }
 
@@ -136,31 +148,53 @@ void HttpServer::serverLoop() {
         if (client == INVALID_SOCKET) {
             continue;
         }
-        handleClient(static_cast<std::uintptr_t>(client));
-        shutdown(client, SD_BOTH);
-        closesocket(client);
+        ++activeConnections_;
+        std::thread([this, client] {
+            try {
+                handleClient(static_cast<std::uintptr_t>(client));
+            } catch (...) {
+            }
+            shutdown(client, SD_BOTH);
+            closesocket(client);
+            --activeConnections_;
+        }).detach();
     }
 }
 
-void HttpServer::handleClient(std::uintptr_t rawClientSocket) {
+std::string HttpServer::readRequest(std::uintptr_t rawClientSocket) const {
     const SOCKET client = static_cast<SOCKET>(rawClientSocket);
-    char buffer[8192];
-    const int received = recv(client, buffer, static_cast<int>(sizeof(buffer) - 1), 0);
-    if (received <= 0) {
+    std::string request;
+    char buffer[4096];
+    while (request.find("\r\n\r\n") == std::string::npos && request.size() < kMaxRequestBytes) {
+        const int received = recv(client, buffer, static_cast<int>(sizeof(buffer)), 0);
+        if (received <= 0) {
+            return {};
+        }
+        request.append(buffer, static_cast<std::size_t>(received));
+    }
+    return request;
+}
+
+void HttpServer::handleClient(std::uintptr_t rawClientSocket) {
+    const std::string request = readRequest(rawClientSocket);
+    if (request.empty()) {
         return;
     }
-    buffer[received] = '\0';
-    std::istringstream request(std::string(buffer, static_cast<std::size_t>(received)));
+    std::istringstream parser(request);
     std::string method;
     std::string path;
     std::string version;
-    request >> method >> path >> version;
+    parser >> method >> path >> version;
     const std::size_t queryPosition = path.find('?');
     if (queryPosition != std::string::npos) {
         path.erase(queryPosition);
     }
 
     std::string response;
+    if (method == "GET" && path == "/api/stream") {
+        handleStream(rawClientSocket);
+        return;
+    }
     if (method == "GET" && path == "/api/snapshot") {
         response = buildResponse(200, "OK", "application/json; charset=utf-8", simulator_.snapshotJson());
     } else if (method == "POST" && path == "/api/control/pause") {
@@ -184,6 +218,40 @@ void HttpServer::handleClient(std::uintptr_t rawClientSocket) {
         response = buildResponse(405, "Method Not Allowed", "text/plain; charset=utf-8", "请求方法不受支持");
     }
     sendAll(rawClientSocket, response);
+}
+
+void HttpServer::handleStream(std::uintptr_t rawClientSocket) {
+    std::ostringstream headers;
+    headers << "HTTP/1.1 200 OK\r\n"
+            << "Content-Type: text/event-stream; charset=utf-8\r\n"
+            << "Cache-Control: no-store\r\n"
+            << "X-Accel-Buffering: no\r\n"
+            << "Connection: keep-alive\r\n\r\n";
+    if (!sendAll(rawClientSocket, headers.str())) {
+        return;
+    }
+
+    StreamToken lastToken{};
+    auto lastSentAt = std::chrono::steady_clock::now() - std::chrono::seconds(kStreamPingSeconds);
+    while (running_.load()) {
+        const auto now = std::chrono::steady_clock::now();
+        const StreamToken token = simulator_.streamToken();
+        if (token != lastToken && now - lastSentAt >= std::chrono::milliseconds(kStreamIntervalMs)) {
+            const std::string payload = "data: " + simulator_.snapshotJson() + "\n\n";
+            if (!sendAll(rawClientSocket, payload)) {
+                return;
+            }
+            lastToken = token;
+            lastSentAt = now;
+        } else if (now - lastSentAt >= std::chrono::seconds(kStreamPingSeconds)) {
+            // SSE 注释行，客户端会忽略；防止空闲连接被代理掐断
+            if (!sendAll(rawClientSocket, ": ping\n\n")) {
+                return;
+            }
+            lastSentAt = now;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kStreamPollMs));
+    }
 }
 
 std::string HttpServer::readStaticFile(const std::string& requestPath, std::string& contentType) const {

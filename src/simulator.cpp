@@ -33,7 +33,6 @@ void Simulator::start() {
         return;
     }
     stopRequested_.store(false);
-    producerThread_ = std::thread(&Simulator::producerLoop, this);
     schedulerThread_ = std::thread(&Simulator::schedulerLoop, this);
 }
 
@@ -43,9 +42,6 @@ void Simulator::stop() {
     }
     stopRequested_.store(true);
     controlCondition_.notify_all();
-    if (producerThread_.joinable()) {
-        producerThread_.join();
-    }
     if (schedulerThread_.joinable()) {
         schedulerThread_.join();
     }
@@ -75,33 +71,6 @@ bool Simulator::paused() const {
     return paused_.load();
 }
 
-void Simulator::producerLoop() {
-    std::mt19937 random(seed_ ^ 0x85EBCA6BU);
-    std::uint64_t observedEpoch = resetEpoch_.load();
-    while (!stopRequested_.load()) {
-        std::unique_lock<std::mutex> lock(controlMutex_);
-        controlCondition_.wait_for(lock, std::chrono::seconds(1), [this] {
-            return stopRequested_.load() || resetRequested_.load();
-        });
-        lock.unlock();
-        if (stopRequested_.load()) {
-            break;
-        }
-        const std::uint64_t epoch = resetEpoch_.load();
-        if (epoch != observedEpoch) {
-            random.seed(seed_ ^ 0x85EBCA6BU);
-            observedEpoch = epoch;
-        }
-        if (paused_.load() || resetRequested_.load()) {
-            continue;
-        }
-        std::lock_guard<std::mutex> resetLock(resetMutex_);
-        if (!resetRequested_.load()) {
-            generateOrderBatch(random);
-        }
-    }
-}
-
 void Simulator::schedulerLoop() {
     while (!stopRequested_.load()) {
         std::unique_lock<std::mutex> lock(controlMutex_);
@@ -113,7 +82,6 @@ void Simulator::schedulerLoop() {
             break;
         }
         if (resetRequested_.exchange(false)) {
-            std::lock_guard<std::mutex> resetLock(resetMutex_);
             std::lock_guard<std::mutex> stateLock(stateMutex_);
             resetStateLocked();
             resetEpoch_.fetch_add(1);
@@ -129,6 +97,9 @@ void Simulator::executeTick() {
     const std::uint64_t currentTick = tick_.fetch_add(1) + 1;
     std::lock_guard<std::mutex> lock(stateMutex_);
     processDriverTransitionsLocked(currentTick);
+    if (autoGenerate_) {
+        generateOrderBatchLocked(currentTick);
+    }
     processOrdersLocked(currentTick);
     rebalanceLocked(currentTick);
 }
@@ -177,6 +148,30 @@ void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
         if (previousState == DriverState::Serving) {
             ++completed_;
         }
+    }
+}
+
+void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
+    std::uniform_int_distribution<int> countDistribution(5, 10);
+    std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
+    std::uniform_int_distribution<int> hotspotOffset(0, 29);
+    std::uniform_int_distribution<int> probability(1, 100);
+    const int hotspotIndex = static_cast<int>((currentTick / 30) % 3);
+    const int count = countDistribution(schedulerRandom_);
+
+    for (int index = 0; index < count; ++index) {
+        Order order;
+        order.id = nextOrderId_.fetch_add(1);
+        order.createdTick = currentTick;
+        if (probability(schedulerRandom_) <= 80) {
+            order.x = kHotspotOrigins[hotspotIndex][0] + hotspotOffset(schedulerRandom_);
+            order.y = kHotspotOrigins[hotspotIndex][1] + hotspotOffset(schedulerRandom_);
+        } else {
+            order.x = coordinate(schedulerRandom_);
+            order.y = coordinate(schedulerRandom_);
+        }
+        orders_.push(order);
+        generated_.fetch_add(1);
     }
 }
 
@@ -347,30 +342,6 @@ Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
     return nullptr;
 }
 
-void Simulator::generateOrderBatch(std::mt19937& random) {
-    std::uniform_int_distribution<int> countDistribution(5, 10);
-    std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
-    std::uniform_int_distribution<int> hotspotOffset(0, 29);
-    std::uniform_int_distribution<int> probability(1, 100);
-    const int hotspotIndex = static_cast<int>((tick_.load() / 30) % 3);
-    const int count = countDistribution(random);
-
-    for (int index = 0; index < count; ++index) {
-        Order order;
-        order.id = nextOrderId_.fetch_add(1);
-        order.createdTick = tick_.load();
-        if (probability(random) <= 80) {
-            order.x = kHotspotOrigins[hotspotIndex][0] + hotspotOffset(random);
-            order.y = kHotspotOrigins[hotspotIndex][1] + hotspotOffset(random);
-        } else {
-            order.x = coordinate(random);
-            order.y = coordinate(random);
-        }
-        orders_.push(order);
-        generated_.fetch_add(1);
-    }
-}
-
 const char* Simulator::driverStateName(DriverState state) {
     switch (state) {
         case DriverState::Idle: return "IDLE";
@@ -378,6 +349,11 @@ const char* Simulator::driverStateName(DriverState state) {
         case DriverState::Rebalancing: return "REBALANCING";
     }
     return "UNKNOWN";
+}
+
+StreamToken Simulator::streamToken() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return StreamToken{tick_.load(), resetEpoch_.load(), logs_.lastSequence(), paused_.load()};
 }
 
 std::string Simulator::snapshotJson() const {
@@ -437,9 +413,15 @@ void Simulator::testClearState() {
     tick_.store(0);
     generated_.store(0);
     matched_ = cancelled_ = completed_ = matchAttempts_ = totalMatchMicros_ = 0;
+    autoGenerate_ = false;
     for (Driver& driver : drivers_) {
         driver = Driver{};
     }
+}
+
+void Simulator::testSetAutoGenerate(bool enabled) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    autoGenerate_ = enabled;
 }
 
 void Simulator::testAddDriver(int slot, int id, int x, int y, double rating) {
@@ -468,6 +450,7 @@ Driver Simulator::testDriver(int slot) const {
 }
 
 std::size_t Simulator::testQueueSize() const { return orders_.size(); }
+std::uint64_t Simulator::testGenerated() const { return generated_.load(); }
 std::uint64_t Simulator::testMatched() const { std::lock_guard<std::mutex> lock(stateMutex_); return matched_; }
 std::uint64_t Simulator::testCancelled() const { std::lock_guard<std::mutex> lock(stateMutex_); return cancelled_; }
 std::uint64_t Simulator::testCompleted() const { std::lock_guard<std::mutex> lock(stateMutex_); return completed_; }

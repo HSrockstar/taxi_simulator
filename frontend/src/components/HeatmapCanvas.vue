@@ -8,41 +8,86 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const tooltip = ref<{ x: number; y: number; text: string } | null>(null)
 const label = computed(() => tooltip.value?.text ?? '悬停查看网格供需情况')
 
-function cellColor(pending: number, idle: number): string {
+const offscreen = document.createElement('canvas')
+offscreen.width = 100
+offscreen.height = 100
+const offscreenContext = offscreen.getContext('2d')
+let gridImage: ImageData | null = null
+
+function hslToRgb(hue: number, saturation: number, lightness: number): [number, number, number] {
+  const s = saturation / 100
+  const l = lightness / 100
+  const channel = (n: number): number => {
+    const k = (n + hue / 30) % 12
+    const a = s * Math.min(l, 1 - l)
+    return l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))
+  }
+  return [Math.round(channel(0) * 255), Math.round(channel(8) * 255), Math.round(channel(4) * 255)]
+}
+
+function cellRgb(pending: number, idle: number): [number, number, number] {
   const difference = pending - idle
   if (difference > 0) {
     const strength = Math.min(1, difference / 5)
-    return `hsl(${Math.round(7 - strength * 7)} 80% ${Math.round(25 + strength * 29)}%)`
+    return hslToRgb(7 - strength * 7, 80, 25 + strength * 29)
   }
   if (difference < 0) {
     const strength = Math.min(1, -difference / 3)
-    return `hsl(${Math.round(150 + strength * 12)} 56% ${Math.round(18 + strength * 23)}%)`
+    return hslToRgb(150 + strength * 12, 56, 18 + strength * 23)
   }
-  return pending > 0 ? '#725337' : '#0e202a'
+  return pending > 0 ? [114, 83, 55] : [14, 32, 42]
 }
 
 function draw(): void {
   const element = canvas.value
   const snapshot = props.snapshot
-  if (!element || !snapshot) return
+  if (!element || !snapshot || !offscreenContext) return
 
+  const dpr = window.devicePixelRatio || 1
+  const target = Math.max(200, Math.min(2048, Math.round(element.clientWidth * dpr)))
+  if (element.width !== target) {
+    element.width = target
+    element.height = target
+  }
   const size = element.width
   const context = element.getContext('2d')
   if (!context) return
-  const cellSize = size / 100
-  context.clearRect(0, 0, size, size)
 
+  if (!gridImage) gridImage = offscreenContext.createImageData(100, 100)
+  const data = gridImage.data
   for (let index = 0; index < 10000; index += 1) {
-    const x = (index % 100) * cellSize
-    const y = Math.floor(index / 100) * cellSize
-    context.fillStyle = cellColor(snapshot.pending[index], snapshot.idle[index])
-    context.fillRect(x, y, cellSize - 0.28, cellSize - 0.28)
+    const [red, green, blue] = cellRgb(snapshot.pending[index], snapshot.idle[index])
+    const offset = index * 4
+    data[offset] = red
+    data[offset + 1] = green
+    data[offset + 2] = blue
+    data[offset + 3] = 255
   }
+  offscreenContext.putImageData(gridImage, 0, 0)
+
+  const cellSize = size / 100
+  context.imageSmoothingEnabled = false
+  context.fillStyle = '#091820'
+  context.fillRect(0, 0, size, size)
+  context.drawImage(offscreen, 0, 0, size, size)
+
+  context.strokeStyle = '#091820'
+  context.lineWidth = Math.max(0.4, cellSize * 0.035)
+  context.beginPath()
+  for (let line = 0; line <= 100; line += 1) {
+    const position = line * cellSize
+    context.moveTo(position, 0)
+    context.lineTo(position, size)
+    context.moveTo(0, position)
+    context.lineTo(size, position)
+  }
+  context.stroke()
 
   for (const driver of snapshot.drivers) {
     if (driver.state === 'SERVING') continue
     context.beginPath()
-    context.arc(driver.x / 1000 * size, driver.y / 1000 * size, driver.state === 'REBALANCING' ? 3.4 : 2, 0, Math.PI * 2)
+    const radius = cellSize * (driver.state === 'REBALANCING' ? 0.42 : 0.25)
+    context.arc(driver.x / 1000 * size, driver.y / 1000 * size, radius, 0, Math.PI * 2)
     context.fillStyle = driver.state === 'REBALANCING' ? '#55d8ff' : '#ddfff2'
     context.fill()
   }
