@@ -209,8 +209,8 @@ function buildBase(snapshot: DashboardSnapshot, size: number): void {
         phase: (index % 17) * 0.7,
       }
       hotCells.push(cellInfo)
-      // 与调度引擎同一判据：差值达到失衡阈值的格子标记为红色警报热点区
-      if (difference >= threshold) alertCells.push(cellInfo)
+      // 与调度引擎同一判据：差值严格超过失衡阈值的格子标记为红色警报热点区
+      if (difference > threshold) alertCells.push(cellInfo)
     }
   }
   offscreenContext.putImageData(gridImage, 0, 0)
@@ -263,7 +263,7 @@ function composite(now: number): void {
       context.globalAlpha = 1
       context.globalCompositeOperation = 'source-over'
 
-      // 红色警报热点区：差值达到失衡阈值的格子同步呼吸描框，随参数面板实时增减
+      // 红色警报热点区：差值严格超过失衡阈值的格子同步呼吸描框，随参数面板实时增减
       const alertPulse = 0.55 + 0.4 * Math.sin(seconds * 2.4)
       context.strokeStyle = `rgba(255, 84, 98, ${alertPulse.toFixed(3)})`
       context.lineWidth = Math.max(1.2, cell * 0.14)
@@ -450,12 +450,12 @@ onBeforeUnmount(() => {
     <div class="panel-heading">
       <div>
         <h2>城市供需热力图</h2>
-        <p class="heading-description">红色代表订单积压，绿色代表运力富余，红框为达到失衡阈值的警报热点区，青色路径为调度流向，橙色虚线为前往接客，紫色虚线为行程中。</p>
+        <p class="heading-description">红色代表订单积压，绿色代表运力富余，红框为超过失衡阈值的警报热点区，青色路径为调度流向，橙色虚线为前往接客，紫色虚线为行程中。</p>
       </div>
       <div class="map-legend" aria-label="热力图图例">
         <span class="data-chip chip-demand"><i></i>需求缺口</span>
         <span class="data-chip chip-supply"><i></i>运力富余</span>
-        <span class="data-chip chip-alert"><i></i>警报热点 ≥ <b>{{ snapshot?.params.imbalanceThreshold ?? 2 }}</b></span>
+        <span class="data-chip chip-alert"><i></i>警报热点 &gt; <b>{{ snapshot?.params.imbalanceThreshold ?? 2 }}</b></span>
         <span class="data-chip chip-traffic"><i></i>斜线：路况缓行/拥堵</span>
         <span class="data-chip chip-enroute"><i></i>前往接客</span>
         <span class="data-chip chip-ontrip"><i></i>行程中</span>

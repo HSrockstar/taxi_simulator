@@ -15,10 +15,9 @@ constexpr int kHotspotOrigins[3][2] = {
     {450, 700}
 };
 
-// 接客在途时长：按撮合距离估算（约 300 米/模拟秒，每 tick 30 米），最短 2 秒保证"前往接客"状态可见
-int pickupTicksFor(double distance) {
-    const int ticks = static_cast<int>(std::ceil(distance / (300.0 / kTicksPerSecond)));
-    return std::clamp(ticks, 2 * kTicksPerSecond, 6 * kTicksPerSecond);
+// 接客在途时长直接复用撮合 ETA；至少保留一个 tick，避免同一状态在单拍内被跳过。
+int pickupTicksFor(double etaSeconds) {
+    return std::max(1, static_cast<int>(std::ceil(etaSeconds * kTicksPerSecond)));
 }
 
 // 空闲司机游走：每 tick 5% 概率移动一格（平均每秒 0.5 步）；调度半径外的司机迈步时 70% 朝当前活跃热点漂移。
@@ -410,8 +409,12 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
         const auto startedAt = std::chrono::steady_clock::now();
         Driver* driver = findBestDriverLocked(order, distance, etaSeconds, score);
         const auto endedAt = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(endedAt - startedAt).count();
-        totalMatchMicros_ += static_cast<std::uint64_t>(elapsed);
+        const auto measuredMicros = std::chrono::duration_cast<std::chrono::microseconds>(endedAt - startedAt).count();
+        // 部分 Windows 计时器对极短撮合会返回 0；一次真实撮合尝试至少计 1 微秒，
+        // 使累计耗时和实时日志保持可观测。
+        const std::uint64_t elapsed = static_cast<std::uint64_t>(
+            std::max<std::int64_t>(1, static_cast<std::int64_t>(measuredMicros)));
+        totalMatchMicros_ += elapsed;
         ++matchAttempts_;
 
         if (driver == nullptr) {
@@ -423,7 +426,7 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
         grid_.removeDriver(driver);
         const int slot = static_cast<int>(driver - drivers_);
         driver->state = DriverState::EnRoute;
-        driver->readyTick = currentTick + static_cast<std::uint64_t>(pickupTicksFor(distance));
+        driver->readyTick = currentTick + static_cast<std::uint64_t>(pickupTicksFor(etaSeconds));
         driver->targetX = order.x;
         driver->targetY = order.y;
         driver->activeOrderId = order.id;
@@ -531,11 +534,11 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
         for (int targetX = 0; targetX < kGridSide; ++targetX) {
             GridCell& target = grid_.cell(targetX, targetY);
             int imbalance = target.pendingCount - target.idleCount;
-            if (imbalance < params_.imbalanceThreshold) {
+            if (imbalance <= params_.imbalanceThreshold) {
                 continue;
             }
             int moved = 0;
-            while (imbalance >= params_.imbalanceThreshold && moved < 2) {
+            while (imbalance > params_.imbalanceThreshold && moved < 2) {
                 Driver* donor = findDonorDriverLocked(targetX, targetY);
                 if (donor == nullptr) {
                     break;

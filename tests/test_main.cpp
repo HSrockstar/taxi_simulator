@@ -177,6 +177,8 @@ void testSimulatorAlgorithms() {
     check(simulator.testDriver(1).state == taxi::DriverState::EnRoute &&
           simulator.testDriver(0).state == taxi::DriverState::Idle,
           "近车遇拥堵时 ETA 更低的远车优先匹配");
+    check(simulator.testDriver(1).readyTick - 1 > 6 * taxi::kTicksPerSecond,
+          "接客在途时长直接采用 ETA，不再被旧的六秒上限截断");
     const std::string trafficSnapshot = simulator.snapshotJson();
     check(trafficSnapshot.find("\"traffic\":[") != std::string::npos &&
           trafficSnapshot.find("2.5") != std::string::npos,
@@ -186,6 +188,19 @@ void testSimulatorAlgorithms() {
           "派单日志包含 ETA 与路况信息");
 
     check(simulator.updateParams(taxi::SimulatorParams{}), "路况测试后恢复默认参数");
+
+    simulator.testClearState();
+    simulator.testAddDriver(0, 10, 255, 205, 4.8);
+    simulator.testPushOrder(30, 205, 205);
+    simulator.testPushOrder(31, 205, 205);
+    simulator.testTick();
+    check(simulator.testDriver(0).state == taxi::DriverState::Idle,
+          "供需差值等于阈值时不触发调度");
+    simulator.testPushOrder(32, 205, 205);
+    simulator.testTick();
+    check(simulator.testDriver(0).state == taxi::DriverState::Rebalancing,
+          "供需差值超过阈值时触发调度");
+
     simulator.testClearState();
     simulator.testAddDriver(0, 1, 105, 100, 4.0);
     simulator.testAddDriver(1, 2, 95, 100, 5.0);
@@ -198,14 +213,14 @@ void testSimulatorAlgorithms() {
           simulator.testDriver(0).state == taxi::DriverState::Idle,
           "撮合后司机先前往接客且订单记为已匹配");
     simulator.testTick();
-    // 接客在途最长 6 秒（6 * kTicksPerSecond 个 tick），逐 tick 推进直到接到乘客
-    for (int tick = 0; tick < 6 * taxi::kTicksPerSecond &&
+    // 接客在途时长按 ETA 换算；本场景 ETA 很短，但给足上界以覆盖状态推进。
+    for (int tick = 0; tick < 10 * taxi::kTicksPerSecond &&
          simulator.testDriver(1).state == taxi::DriverState::EnRoute; ++tick) {
         simulator.testTick();
     }
     check(simulator.testDriver(1).state == taxi::DriverState::OnTrip,
           "接到乘客后进入行程中状态");
-    // 行程最长 20 秒，接客剩余路程最长 6 秒，覆盖到最坏完成时间
+    // 行程最长 20 秒；本场景接客 ETA 不超过 10 秒，覆盖到最坏完成时间
     for (int tick = 0; tick < 21 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     check(simulator.testCompleted() == 1 && simulator.testDriver(1).state == taxi::DriverState::Idle,
           "行程完成后司机重新进入空闲状态");
@@ -243,12 +258,13 @@ void testSimulatorAlgorithms() {
           "调度到达后的司机参与下一轮撮合");
 
     // 供体选择与撮合一致：距离 40 米评分 4.9 的司机堆顶胜出，
-    // 距离 50 米评分 4.0 的司机留在原地（2 个订单只触发一次调度）
+    // 距离 50 米评分 4.0 的司机留在原地（3 个订单严格超过阈值后只触发一次调度）
     simulator.testClearState();
     simulator.testAddDriver(1, 21, 255, 205, 4.0);
     simulator.testAddDriver(2, 22, 245, 205, 4.9);
     simulator.testPushOrder(20, 205, 205);
     simulator.testPushOrder(21, 205, 205);
+    simulator.testPushOrder(22, 205, 205);
     simulator.testTick();
     check(simulator.testDriver(2).state == taxi::DriverState::Rebalancing &&
           simulator.testDriver(1).state == taxi::DriverState::Idle,
