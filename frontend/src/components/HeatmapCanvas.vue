@@ -8,6 +8,10 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const tooltip = ref<{ x: number; y: number; text: string } | null>(null)
 const label = computed(() => tooltip.value?.text ?? '悬停查看网格供需情况')
 
+// 与 styles.css 的三列锁定布局断点保持一致：宽屏下画布由可用高度和列宽共同决定
+const wideLayout = window.matchMedia('(min-width: 1280px) and (min-height: 700px)')
+let resizeObserver: ResizeObserver | null = null
+
 const offscreen = document.createElement('canvas')
 offscreen.width = 100
 offscreen.height = 100
@@ -121,7 +125,7 @@ function spriteFor(key: SpriteKey): HTMLCanvasElement {
 }
 
 function drawRuler(context: CanvasRenderingContext2D, cell: number): void {
-  context.font = `${Math.min(13, Math.max(9, cell * 1.3))}px "JetBrains Mono", Consolas, monospace`
+  context.font = `${Math.min(18, Math.max(10, cell * 1.35))}px "JetBrains Mono", Consolas, monospace`
   context.textBaseline = 'top'
   context.lineWidth = 1
   for (let tick = 0; tick < 100; tick += 5) {
@@ -338,9 +342,23 @@ function composite(now: number): void {
 
 function syncSize(): number {
   const element = canvas.value
-  if (!element) return 0
+  const stage = element?.parentElement?.parentElement ?? null
+  if (!element || !stage) return 0
   const dpr = window.devicePixelRatio || 1
-  const target = Math.max(200, Math.min(2048, Math.round(element.clientWidth * dpr)))
+  let cssSize: number
+  if (wideLayout.matches) {
+    // 一屏锁定布局：正方形画布取「列宽与剩余高度」的较小值，居中放置
+    cssSize = Math.floor(Math.min(stage.clientWidth, stage.clientHeight))
+    element.style.width = `${cssSize}px`
+    element.style.height = `${cssSize}px`
+  } else {
+    // 经典两列布局：画布宽度跟随列宽，高度按正方形延展
+    element.style.width = ''
+    element.style.height = ''
+    cssSize = element.clientWidth
+  }
+  if (cssSize < 50) return 0
+  const target = Math.max(200, Math.min(2048, Math.round(cssSize * dpr)))
   if (element.width !== target) {
     element.width = target
     element.height = target
@@ -349,10 +367,10 @@ function syncSize(): number {
 }
 
 function rebuild(): void {
+  const size = syncSize()
   const snapshot = props.snapshot
   if (!snapshot) return
   syncFlows(snapshot)
-  const size = syncSize()
   if (size) buildBase(snapshot, size)
 }
 
@@ -379,12 +397,17 @@ function clearTooltip(): void {
 
 watch(() => props.snapshot, rebuild)
 onMounted(() => {
-  window.addEventListener('resize', rebuild)
+  const stage = canvas.value?.parentElement?.parentElement ?? null
+  if (stage) {
+    resizeObserver = new ResizeObserver(() => rebuild())
+    resizeObserver.observe(stage)
+  }
   rebuild()
   rafId = requestAnimationFrame(composite)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', rebuild)
+  resizeObserver?.disconnect()
+  resizeObserver = null
   cancelAnimationFrame(rafId)
 })
 </script>
@@ -404,10 +427,12 @@ onBeforeUnmount(() => {
         <span class="data-chip chip-ontrip"><i></i>行程中</span>
       </div>
     </div>
-    <div class="map-frame">
-      <canvas ref="canvas" width="800" height="800" aria-label="城市供需热力图" @pointermove="handlePointer" @pointerleave="clearTooltip" />
-      <div v-if="tooltip" class="map-tooltip" :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }">{{ tooltip.text }}</div>
-      <p class="map-caption">{{ label }}</p>
+    <div class="map-stage">
+      <div class="map-frame">
+        <canvas ref="canvas" width="800" height="800" aria-label="城市供需热力图" @pointermove="handlePointer" @pointerleave="clearTooltip" />
+        <div v-if="tooltip" class="map-tooltip" :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }">{{ tooltip.text }}</div>
+        <p class="map-caption">{{ label }}</p>
+      </div>
     </div>
   </section>
 </template>
