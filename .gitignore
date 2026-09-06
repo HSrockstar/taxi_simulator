@@ -3,3 +3,6 @@ frontend/node_modules/
 
 # TypeScript 增量构建缓存。
 frontend/*.tsbuildinfo
+
+# ZCode 工作区本地文件。
+.zcode/
