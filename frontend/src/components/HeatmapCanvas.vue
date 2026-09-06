@@ -56,7 +56,7 @@ interface Flow {
   startedAt: number
 }
 
-// 后端调度行程固定为 2 个 tick（约 2 秒），流向动画与其同步
+// 后端调度行程固定为 20 个 tick（约 2 秒），流向动画与其同步
 const kFlowDurationMs = 2000
 const flows = new Map<number, Flow>()
 

@@ -21,9 +21,11 @@ const statusText = computed(() => {
   if (snapshot.value?.paused) return '模拟已暂停'
   return '引擎运行中'
 })
+// 引擎 tick 为 100ms（后端 kTicksPerSecond = 10），展示层统一换算回"模拟秒"
+const TICKS_PER_SECOND = 10
 const tickText = computed(() => {
   const tick = snapshot.value?.tick ?? 0
-  return `T+${String(tick).padStart(3, '0')}s`
+  return `T+${String(Math.floor(tick / TICKS_PER_SECOND)).padStart(3, '0')}s`
 })
 
 function formatTotalMatchTime(micros: number): string {
@@ -33,6 +35,8 @@ function formatTotalMatchTime(micros: number): string {
 }
 
 function addHistory(data: DashboardSnapshot): void {
+  // 每 10 个 tick（一个模拟秒）采样一个趋势点，36 个点即 36 秒窗口
+  if (data.tick % TICKS_PER_SECOND !== 0) return
   const lastPoint = history.value.at(-1)
   if (lastPoint?.tick === data.tick) return
   history.value.push({

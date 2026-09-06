@@ -15,15 +15,15 @@ constexpr int kHotspotOrigins[3][2] = {
     {450, 700}
 };
 
-// 接客在途时长：按撮合距离估算（约 300 米/模拟秒），最短 2 秒保证"前往接客"状态可见
+// 接客在途时长：按撮合距离估算（约 300 米/模拟秒，每 tick 30 米），最短 2 秒保证"前往接客"状态可见
 int pickupTicksFor(double distance) {
-    const int ticks = static_cast<int>(std::ceil(distance / 300.0));
-    return std::clamp(ticks, 2, 6);
+    const int ticks = static_cast<int>(std::ceil(distance / (300.0 / kTicksPerSecond)));
+    return std::clamp(ticks, 2 * kTicksPerSecond, 6 * kTicksPerSecond);
 }
 
-// 空闲司机游走：每秒 50% 概率移动一格；调度半径外的司机迈步时 70% 朝当前活跃热点漂移。
+// 空闲司机游走：每 tick 5% 概率移动一格（平均每秒 0.5 步）；调度半径外的司机迈步时 70% 朝当前活跃热点漂移。
 // 仅作为"撮合半径外运力静止"的背景补充，半径内运力仍由显式调度机制主导
-constexpr double kIdleWanderProbability = 0.5;
+constexpr double kIdleWanderProbability = 0.05;
 constexpr double kIdleDriftBias = 0.7;
 
 }  // namespace
@@ -89,7 +89,7 @@ bool Simulator::paused() const {
 void Simulator::schedulerLoop() {
     while (!stopRequested_.load()) {
         std::unique_lock<std::mutex> lock(controlMutex_);
-        controlCondition_.wait_for(lock, std::chrono::seconds(1), [this] {
+        controlCondition_.wait_for(lock, std::chrono::milliseconds(1000 / kTicksPerSecond), [this] {
             return stopRequested_.load() || resetRequested_.load();
         });
         lock.unlock();
@@ -112,7 +112,8 @@ void Simulator::executeTick() {
     const std::uint64_t currentTick = tick_.fetch_add(1) + 1;
     std::lock_guard<std::mutex> lock(stateMutex_);
     processDriverTransitionsLocked(currentTick);
-    if (autoGenerate_) {
+    // 订单率参数的语义是"单/秒"，每个模拟秒（kTicksPerSecond 个 tick）批量生成一次
+    if (autoGenerate_ && currentTick % kTicksPerSecond == 0) {
         generateOrderBatchLocked(currentTick);
     }
     processOrdersLocked(currentTick);
@@ -216,7 +217,7 @@ void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
             stepTripDriverLocked(index, driver, currentTick);
             continue;
         }
-        // 调度行程固定 2 个 tick，到达热点格后回归空闲并入格
+        // 调度行程固定 2 秒（2 * kTicksPerSecond 个 tick），到达热点格后回归空闲并入格
         if (driver.readyTick > currentTick) {
             continue;
         }
@@ -240,7 +241,7 @@ void Simulator::stepIdleDriverLocked(Driver& driver, std::uint64_t currentTick) 
 
     // 调度半径外的空闲车做定向漂移（平台调度够不着），半径内保持纯随机游走，
     // 让"绿转红"运力转移的可视化仍由显式调度机制呈现
-    const int (&origin)[2] = kHotspotOrigins[(currentTick / 30) % 3];
+    const int (&origin)[2] = kHotspotOrigins[(currentTick / (30 * kTicksPerSecond)) % 3];
     const int hotCellX = origin[0] / kCellSize;
     const int hotCellY = origin[1] / kCellSize;
     const int myCellX = GridIndex::coordinateToCell(driver.x);
@@ -279,7 +280,7 @@ void Simulator::stepTripDriverLocked(int slot, Driver& driver, std::uint64_t cur
         driver.y = driver.targetY;
         driver.state = DriverState::OnTrip;
         std::uniform_int_distribution<int> destination(0, kMapSize - 1);
-        std::uniform_int_distribution<int> tripDuration(8, 20);
+        std::uniform_int_distribution<int> tripDuration(8 * kTicksPerSecond, 20 * kTicksPerSecond);
         driver.readyTick = currentTick + static_cast<std::uint64_t>(tripDuration(schedulerRandom_));
         driver.targetX = destination(schedulerRandom_);
         driver.targetY = destination(schedulerRandom_);
@@ -297,10 +298,11 @@ void Simulator::stepTripDriverLocked(int slot, Driver& driver, std::uint64_t cur
     Order& order = activeOrders_[slot];
     order.state = OrderState::Completed;
     ++completed_;
+    const double tripSeconds = static_cast<double>(currentTick - order.createdTick) / kTicksPerSecond;
     std::ostringstream message;
     message << "[行程完成] 订单#" << order.id << " 由司机#"
             << std::setw(3) << std::setfill('0') << driver.id
-            << " 完成，全程耗时 " << (currentTick - order.createdTick) << " 秒";
+            << " 完成，全程耗时 " << std::fixed << std::setprecision(1) << tripSeconds << " 秒";
     logs_.push(message.str());
     driver.activeOrderId = 0;
     grid_.addDriver(&driver);
@@ -311,7 +313,7 @@ void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
     std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
     std::uniform_int_distribution<int> hotspotOffset(0, 29);
     std::uniform_int_distribution<int> probability(1, 100);
-    const int hotspotIndex = static_cast<int>((currentTick / 30) % 3);
+    const int hotspotIndex = static_cast<int>((currentTick / (30 * kTicksPerSecond)) % 3);
     const int count = countDistribution(schedulerRandom_);
 
     for (int index = 0; index < count; ++index) {
@@ -346,7 +348,7 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
             order.countedInGrid = true;
         }
 
-        if (currentTick >= order.createdTick + static_cast<std::uint64_t>(params_.orderTimeout)) {
+        if (currentTick >= order.createdTick + static_cast<std::uint64_t>(params_.orderTimeout * kTicksPerSecond)) {
             --orderCell.pendingCount;
             order.state = OrderState::Cancelled;
             ++cancelled_;
@@ -455,7 +457,7 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
                 donor->state = DriverState::Rebalancing;
                 donor->targetX = targetX * kCellSize + offset(schedulerRandom_);
                 donor->targetY = targetY * kCellSize + offset(schedulerRandom_);
-                donor->readyTick = currentTick + 2;
+                donor->readyTick = currentTick + 2 * kTicksPerSecond;
                 ++moved;
                 --imbalance;
 
@@ -552,7 +554,7 @@ std::string Simulator::snapshotJson() const {
 
     output << "{\"tick\":" << tick_.load()
            << ",\"paused\":" << (paused_.load() ? "true" : "false")
-           << ",\"hotspotIndex\":" << ((tick_.load() / 30) % 3)
+           << ",\"hotspotIndex\":" << ((tick_.load() / (30 * kTicksPerSecond)) % 3)
            << ",\"pending\":[";
     for (int index = 0; index < kGridCount; ++index) {
         if (index > 0) output << ',';

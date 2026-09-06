@@ -173,10 +173,15 @@ void testSimulatorAlgorithms() {
           simulator.testDriver(0).state == taxi::DriverState::Idle,
           "撮合后司机先前往接客且订单记为已匹配");
     simulator.testTick();
-    simulator.testTick();
+    // 接客在途最长 6 秒（6 * kTicksPerSecond 个 tick），逐 tick 推进直到接到乘客
+    for (int tick = 0; tick < 6 * taxi::kTicksPerSecond &&
+         simulator.testDriver(1).state == taxi::DriverState::EnRoute; ++tick) {
+        simulator.testTick();
+    }
     check(simulator.testDriver(1).state == taxi::DriverState::OnTrip,
           "接到乘客后进入行程中状态");
-    for (int tick = 0; tick < 30; ++tick) simulator.testTick();
+    // 行程最长 20 秒，接客剩余路程最长 6 秒，覆盖到最坏完成时间
+    for (int tick = 0; tick < 21 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     check(simulator.testCompleted() == 1 && simulator.testDriver(1).state == taxi::DriverState::Idle,
           "行程完成后司机重新进入空闲状态");
     check(simulator.testActiveOrder(1).state == taxi::OrderState::Completed,
@@ -195,7 +200,7 @@ void testSimulatorAlgorithms() {
 
     simulator.testClearState();
     simulator.testPushOrder(2, 500, 500);
-    for (int tick = 0; tick < 10; ++tick) simulator.testTick();
+    for (int tick = 0; tick < 10 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     check(simulator.testCancelled() == 1 && simulator.testQueueSize() == 0,
           "订单等待十秒后超时取消");
 
@@ -207,8 +212,8 @@ void testSimulatorAlgorithms() {
     simulator.testTick();
     check(simulator.testDriver(0).state == taxi::DriverState::Rebalancing,
           "远处富余司机被调往热点网格");
-    simulator.testTick();
-    simulator.testTick();
+    // 调度行程固定 2 秒，到达后司机入格参与撮合
+    for (int tick = 0; tick < 2 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     check(simulator.testMatched() == 1 && simulator.testQueueSize() == 2,
           "调度到达后的司机参与下一轮撮合");
 
@@ -291,15 +296,15 @@ void testIdleWander() {
         return total / wanderDriverCount;
     };
 
-    // 定向漂移：29 tick 恰好覆盖 epoch 0（活跃热点恒为 (200,200)），
-    // 期望漂移步数约 29*0.5*0.7 ≈ 10 格，均值噪声不足 ±10 单位
+    // 定向漂移：290 tick（29 模拟秒）恰好覆盖 epoch 0（热点每 300 tick 轮换，活跃热点恒为 (200,200)），
+    // 期望漂移步数约 290*0.05*0.7 ≈ 10 格，均值噪声不足 ±50 单位
     simulator.testClearState();
     simulator.testSetIdleWander(true);
     for (int index = 0; index < wanderDriverCount; ++index) {
         simulator.testAddDriver(index, index + 1, 880 + (index % 4) * 20, 880 + (index / 4) * 20, 4.5);
     }
     const double driftBefore = meanChebyshev(200, 200);
-    for (int tick = 0; tick < 29; ++tick) simulator.testTick();
+    for (int tick = 0; tick < 29 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     const double driftAfter = meanChebyshev(200, 200);
     check(driftBefore - driftAfter > 50.0, "调度半径外空闲司机向活跃热点定向漂移");
 
@@ -310,7 +315,7 @@ void testIdleWander() {
         simulator.testAddDriver(index, index + 1, 240 + (index % 4) * 20, 240 + (index / 4) * 20, 4.5);
     }
     const double innerBefore = meanChebyshev(200, 200);
-    for (int tick = 0; tick < 29; ++tick) simulator.testTick();
+    for (int tick = 0; tick < 29 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     const double innerAfter = meanChebyshev(200, 200);
     check(std::abs(innerAfter - innerBefore) < 60.0, "调度半径内空闲司机不产生定向漂移");
 }
@@ -323,8 +328,7 @@ void testDynamicParams() {
     params.orderTimeout = 2;
     check(simulator.updateParams(params), "合法参数更新被接受");
     simulator.testPushOrder(1, 500, 500);
-    simulator.testTick();
-    simulator.testTick();
+    for (int tick = 0; tick < 2 * taxi::kTicksPerSecond; ++tick) simulator.testTick();
     check(simulator.testCancelled() == 1, "超时时间调整为2秒后订单按新值取消");
 
     params = taxi::SimulatorParams{};

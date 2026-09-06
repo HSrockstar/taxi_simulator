@@ -108,7 +108,7 @@ function resetDefaults(): void {
     <div class="panel-heading compact-heading">
       <div>
         <h2>引擎参数调节</h2>
-        <p class="heading-description">保存后立即生效，作用于下一个模拟秒</p>
+        <p class="heading-description">保存后立即生效，作用于下一个模拟节拍（100ms）</p>
       </div>
       <span v-if="dirty" class="dirty-badge">未保存</span>
     </div>

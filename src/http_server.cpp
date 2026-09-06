@@ -13,8 +13,9 @@ namespace taxi {
 namespace {
 
 constexpr std::size_t kMaxRequestBytes = 64 * 1024;
-constexpr int kStreamIntervalMs = 250;
-constexpr int kStreamPollMs = 60;
+// 引擎 tick 为 100ms：推流间隔略宽于一个 tick，前端仍能拿到逐拍细粒度位移
+constexpr int kStreamIntervalMs = 120;
+constexpr int kStreamPollMs = 30;
 constexpr int kStreamPingSeconds = 10;
 
 // 请求头大小写不敏感地提取 Content-Length

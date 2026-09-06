@@ -13,6 +13,9 @@ constexpr int kDriverCount = 100;
 constexpr int kMaxDriverCount = 500;
 constexpr int kDirectMatchRadius = 3;
 constexpr int kRebalanceRadius = 10;
+// 引擎节拍：调度线程每 1/kTicksPerSecond 秒推进一个 tick，
+// 所有以 tick 计的时长（接客、行程、调度、超时）按该值与秒互转
+constexpr int kTicksPerSecond = 10;
 
 enum class DriverState {
     Idle,
