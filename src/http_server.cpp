@@ -12,6 +12,7 @@
 namespace taxi {
 namespace {
 
+// 单请求读取上限，防止异常客户端把服务内存撑爆
 constexpr std::size_t kMaxRequestBytes = 64 * 1024;
 // 引擎 tick 为 100ms：推流间隔略宽于一个 tick，前端仍能拿到逐拍细粒度位移
 constexpr int kStreamIntervalMs = 120;
@@ -78,6 +79,7 @@ bool extractIntField(const std::string& json, const char* key, int& value) {
     return true;
 }
 
+// 静态路径白名单：拒绝 ".."、反斜杠和 URL 编码字符，堵住目录穿越
 bool isSafeStaticPath(const std::string& path) {
     if (path.empty() || path.front() != '/' || path.find("..") != std::string::npos ||
         path.find('\\') != std::string::npos) {
@@ -191,6 +193,7 @@ std::string HttpServer::lastError() const {
 
 void HttpServer::serverLoop() {
     const SOCKET serverSocket = static_cast<SOCKET>(listenSocket_);
+    // select 带 200ms 超时轮询，accept 不会永久阻塞，stop() 才能及时收线
     while (running_.load()) {
         fd_set readSet;
         FD_ZERO(&readSet);
@@ -210,6 +213,7 @@ void HttpServer::serverLoop() {
             continue;
         }
         ++activeConnections_;
+        // 连接线程分离运行，单个请求抛异常就地吞掉，不能拖垮整个服务
         std::thread([this, client] {
             try {
                 handleClient(static_cast<std::uintptr_t>(client));
@@ -327,6 +331,7 @@ void HttpServer::handleStream(std::uintptr_t rawClientSocket) {
     StreamToken lastToken{};
     auto lastSentAt = std::chrono::steady_clock::now() - std::chrono::seconds(kStreamPingSeconds);
     while (running_.load()) {
+        // 状态有变化才推完整快照，最密 120ms 一帧；空闲间隔超 10 秒补一条 ping 保活
         const auto now = std::chrono::steady_clock::now();
         const StreamToken token = simulator_.streamToken();
         if (token != lastToken && now - lastSentAt >= std::chrono::milliseconds(kStreamIntervalMs)) {
@@ -355,6 +360,7 @@ std::string HttpServer::readStaticFile(const std::string& requestPath, std::stri
 
     std::string fileName = requestPath == "/" ? "index.html" : requestPath.substr(1);
     contentType = contentTypeFor(fileName);
+    // 无扩展名的路径回落首页，浏览器里直接刷新子路径不 404
     if (contentType.empty() && fileName.find('.') == std::string::npos) {
         fileName = "index.html";
         contentType = "text/html; charset=utf-8";

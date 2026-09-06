@@ -9,6 +9,8 @@
 
 namespace taxi {
 
+// 手写 HTTP 服务：监听 127.0.0.1，每个连接一个线程。
+// 同时承担 /api 的 JSON 接口、SSE 长连接和 web/ 目录的静态托管
 class HttpServer {
 public:
     HttpServer(Simulator& simulator, std::uint16_t port, std::string webRoot);

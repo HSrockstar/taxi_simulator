@@ -16,6 +16,7 @@ namespace {
 
 std::atomic<bool> keepRunning{true};
 
+// Ctrl+C 或关窗口不直接杀进程，置标志走正常收尾，让端口与线程干净退出
 BOOL WINAPI handleConsoleSignal(DWORD signal) {
     if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT || signal == CTRL_BREAK_EVENT) {
         keepRunning.store(false);
@@ -24,6 +25,7 @@ BOOL WINAPI handleConsoleSignal(DWORD signal) {
     return FALSE;
 }
 
+// 严格解析：参数必须整段都是数字，"8080abc" 这类输入直接拒绝
 bool parseUnsigned(const char* text, unsigned long& value) {
     char* end = nullptr;
     value = std::strtoul(text, &end, 10);
@@ -74,6 +76,7 @@ int main(int argc, char* argv[]) {
         ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
 
+    // 主线程只等退出信号；--duration 到点自动退出，供批量扫参用
     const auto startedAt = std::chrono::steady_clock::now();
     while (keepRunning.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));

@@ -4,6 +4,7 @@
 
 namespace taxi {
 
+// 格子数组一次性分配满 10000 个，运行期不再扩容
 GridIndex::GridIndex() : cells_(new GridCell[kGridCount]) {}
 
 GridIndex::~GridIndex() {
@@ -65,6 +66,7 @@ bool GridIndex::addDriver(Driver* driver) {
     }
     const int index = flatten(coordinateToCell(driver->x), coordinateToCell(driver->y));
     GridCell& target = cells_[index];
+    // 头插法，O(1)；链表指针内嵌在司机节点里，不需要额外分配
     driver->previous = nullptr;
     driver->next = target.head;
     if (target.head != nullptr) {
@@ -127,6 +129,7 @@ OrderQueue::~OrderQueue() {
 }
 
 void OrderQueue::push(const Order& order) {
+    // 节点连同订单副本在锁外构造好，锁只护指针操作
     Node* node = new Node(order);
     std::lock_guard<std::mutex> lock(mutex_);
     if (tail_ == nullptr) {
@@ -147,7 +150,7 @@ bool OrderQueue::tryPop(Order& order) {
     Node* node = head_;
     head_ = node->next;
     if (head_ == nullptr) {
-        tail_ = nullptr;
+        tail_ = nullptr;    // 队列取空时同步收尾指针，否则下次 push 会接在已释放的节点后
     }
     --size_;
     order = node->order;
@@ -183,10 +186,11 @@ MinHeap::~MinHeap() {
 
 void MinHeap::push(const MatchCandidate& candidate) {
     if (size_ == capacity_) {
-        grow();
+        grow();    // 满则申请两倍空间整体搬移
     }
     std::size_t index = size_++;
     data_[index] = candidate;
+    // 上浮：比父结点小就交换，一路升到该在的位置，O(log n)
     while (index > 0) {
         const std::size_t parent = (index - 1) / 2;
         if (!candidateLess(data_[index], data_[parent])) {
@@ -202,6 +206,7 @@ MatchCandidate MinHeap::pop() {
         throw std::underflow_error("最小堆为空");
     }
     MatchCandidate result = data_[0];
+    // 末元素补到堆顶再下沉，每层在左右子女里挑更小的交换
     data_[0] = data_[--size_];
     std::size_t index = 0;
     while (true) {
@@ -243,6 +248,7 @@ void MinHeap::clear() {
 }
 
 void MinHeap::grow() {
+    // 倍增扩容，均摊到每次 push 的搬移开销是常数
     const std::size_t newCapacity = capacity_ * 2;
     MatchCandidate* replacement = new MatchCandidate[newCapacity];
     for (std::size_t index = 0; index < size_; ++index) {
@@ -260,6 +266,7 @@ void MinHeap::swap(std::size_t left, std::size_t right) {
 }
 
 void LogRingBuffer::push(const std::string& message) {
+    // 未满就接到尾部；写满后覆盖 start_ 处最旧条目，首指针取模前移
     std::size_t position = 0;
     if (size_ < kCapacity) {
         position = (start_ + size_) % kCapacity;
@@ -286,6 +293,7 @@ std::uint64_t LogRingBuffer::lastSequence() const {
 }
 
 void LogRingBuffer::appendRecentJson(std::ostringstream& output, std::size_t limit) const {
+    // 从最旧到最新输出最近 limit 条，下标取模回绕；前端拿 sequence 比对，只渲染没见过的
     const std::size_t count = size_ < limit ? size_ : limit;
     const std::size_t first = (start_ + size_ - count) % kCapacity;
     output << '[';
@@ -300,6 +308,7 @@ void LogRingBuffer::appendRecentJson(std::ostringstream& output, std::size_t lim
     output << ']';
 }
 
+// 日志文本里会出现引号、换行这类字符，直接拼进 JSON 会破坏格式，逐个转义
 std::string LogRingBuffer::escapeJson(const std::string& text) {
     std::string result;
     result.reserve(text.size() + 8);

@@ -12,6 +12,7 @@
 
 namespace taxi {
 
+// SSE 推流的变更令牌：四项任一变化才算状态有更新，HTTP 层据此决定要不要推快照
 struct StreamToken {
     std::uint64_t tick = 0;
     std::uint64_t epoch = 0;
@@ -24,6 +25,9 @@ inline bool operator!=(const StreamToken& left, const StreamToken& right) {
            left.logSequence != right.logSequence || left.paused != right.paused;
 }
 
+// 模拟引擎：单一调度线程按 100ms 节拍推进撮合、调度与状态机。
+// 两把锁分工明确：stateMutex_ 保护全部模拟状态，controlMutex_ 只管节拍等待
+// 与停止/重置的即时唤醒，读快照的线程不会被节拍等待卡住。
 class Simulator {
 public:
     explicit Simulator(std::uint32_t seed = 20260808U);
@@ -98,11 +102,11 @@ private:
     std::atomic<bool> paused_{false};
     std::atomic<bool> resetRequested_{false};
     std::atomic<std::uint64_t> tick_{0};
-    std::atomic<std::uint64_t> resetEpoch_{0};
+    std::atomic<std::uint64_t> resetEpoch_{0};  // 每次 reset 加一，tick 归零后 SSE 仍能察觉变化
     std::atomic<std::uint64_t> nextOrderId_{1};
     std::atomic<std::uint64_t> generated_{0};
 
-    std::mt19937 schedulerRandom_;
+    std::mt19937 schedulerRandom_;  // 运行期唯一随机源，只在调度线程里用；同种子序列相同
     bool autoGenerate_ = true;
     // 空闲司机游走开关：测试通过 testClearState 关闭以隔离随机位移对断言的干扰
     bool idleWander_ = true;

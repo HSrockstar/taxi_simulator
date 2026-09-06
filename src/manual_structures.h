@@ -10,6 +10,9 @@
 
 namespace taxi {
 
+// 手写核心数据结构：网格空间索引、订单队列、最小堆、日志环形缓冲。
+// 题目要求网格/队列/堆不得用 STL 容器替代，实现全部基于原生数组与裸指针。
+
 struct GridCell {
     Driver* head = nullptr;
     int idleCount = 0;
@@ -19,6 +22,8 @@ struct GridCell {
     double trafficFactor = 1.0;
 };
 
+// 100×100 网格矩阵：坐标到格子只做两次整除，O(1) 定位；
+// 每格挂一条空闲司机双向链表，链表指针内嵌在 Driver 里，增删与跨格迁移均 O(1)。
 class GridIndex {
 public:
     GridIndex();
@@ -36,15 +41,21 @@ public:
     GridCell& cellByIndex(int index);
     const GridCell& cellByIndex(int index) const;
 
+    // 只收空闲且尚未入格的司机（gridIndex < 0），重复插入会破坏链表，拒绝
     bool addDriver(Driver* driver);
+    // 按司机记录的格号直接定位，节点在链表中部也无需从头查找
     bool removeDriver(Driver* driver);
+    // 摘除、改坐标、入格三步封装，坐标与链表索引不会出现中间态
     bool moveDriver(Driver* driver, int newX, int newY);
+    // 只清链表与计数，司机本体归 Simulator 的槽位数组所有，这里不 delete
     void clear();
 
 private:
     GridCell* cells_;
 };
 
+// 先来先服务的链式队列：单链表带头尾指针，入队尾插、出队取头，均 O(1)。
+// 自带互斥锁，节点由队列持有，出队时把订单副本交给调用方并释放节点。
 class OrderQueue {
 public:
     OrderQueue() = default;
@@ -71,6 +82,8 @@ private:
     std::size_t size_ = 0;
 };
 
+// 动态数组存储的二叉最小堆，堆顶即撮合代价最小的候选。
+// 比较规则走 model.h 的 candidateLess 决胜链，同分候选的弹出顺序也是确定的。
 class MinHeap {
 public:
     explicit MinHeap(std::size_t initialCapacity = 16);
@@ -100,6 +113,8 @@ struct LogEntry {
     std::string message;
 };
 
+// 定长 200 的日志环形缓冲：写满覆盖最旧条目，内存占用恒定。
+// 每条日志带单调递增序号，HTTP 层据此给前端做增量推送，不重不漏。
 class LogRingBuffer {
 public:
     static constexpr std::size_t kCapacity = 200;

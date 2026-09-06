@@ -9,6 +9,7 @@
 namespace taxi {
 namespace {
 
+// 三处热点区域坐标（米），活跃热点每 30 模拟秒按 0→1→2 轮换
 constexpr int kHotspotOrigins[3][2] = {
     {200, 200},
     {700, 200},
@@ -108,6 +109,7 @@ bool Simulator::paused() const {
 
 void Simulator::schedulerLoop() {
     while (!stopRequested_.load()) {
+        // wait_for 定时 100ms 走一拍；停止或重置请求会立即唤醒等待，不等满一拍
         std::unique_lock<std::mutex> lock(controlMutex_);
         controlCondition_.wait_for(lock, std::chrono::milliseconds(1000 / kTicksPerSecond), [this] {
             return stopRequested_.load() || resetRequested_.load();
@@ -157,6 +159,8 @@ void Simulator::resetStateLocked() {
     totalMatchMicros_ = 0;
     schedulerRandom_.seed(seed_ ^ 0x9E3779B9U);
 
+    // 初始布局走独立的局部随机源，重置多少次司机分布都一致；
+    // 运行期序列随 schedulerRandom_ 重新播种从头重放，同种子由此逐拍复现
     std::mt19937 initialRandom(seed_);
     std::uniform_int_distribution<int> coordinate(0, kMapSize - 1);
     std::uniform_real_distribution<double> rating(3.5, 5.0);
@@ -178,6 +182,7 @@ void Simulator::resetStateLocked() {
 }
 
 void Simulator::refreshTrafficLocked(std::uint64_t currentTick) {
+    // 先全场复位到畅通再叠加热点与事故系数，上一次的拥堵不会残留
     for (int index = 0; index < kGridCount; ++index) {
         grid_.cellByIndex(index).trafficFactor = 1.0;
     }
@@ -214,6 +219,7 @@ void Simulator::applyFleetChangeLocked(int previousCount, int newCount) {
         }
         return;
     }
+    // 缩编从尾部回收；被裁司机若带着在途订单，先取消并记"服务中断"，不让订单悬空
     for (int index = previousCount - 1; index >= newCount; --index) {
         Driver& driver = drivers_[index];
         if (driver.activeOrderId != 0) {
@@ -361,6 +367,7 @@ void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
     const int hotspotIndex = static_cast<int>((currentTick / (30 * kTicksPerSecond)) % 3);
     const int count = countDistribution(schedulerRandom_);
 
+    // 80% 的订单落在活跃热点格附近 30 米内，其余均匀撒在全图，失衡场景由构造保证
     for (int index = 0; index < count; ++index) {
         Order order;
         order.id = nextOrderId_.fetch_add(1);
@@ -378,6 +385,7 @@ void Simulator::generateOrderBatchLocked(std::uint64_t currentTick) {
 }
 
 void Simulator::processOrdersLocked(std::uint64_t currentTick) {
+    // 只处理开拍时已在队列里的订单；撮合失败重新入队的排到队尾，本拍不再重试
     const std::size_t batchSize = orders_.size();
 
     for (std::size_t index = 0; index < batchSize; ++index) {
@@ -389,7 +397,7 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
         const int cellY = GridIndex::coordinateToCell(order.y);
         GridCell& orderCell = grid_.cell(cellX, cellY);
         if (!order.countedInGrid) {
-            ++orderCell.pendingCount;
+            ++orderCell.pendingCount;    // 热力图与失衡检测共用的等待计数
             order.countedInGrid = true;
         }
 
@@ -435,6 +443,7 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
         ++matched_;
 
         std::ostringstream message;
+        // 平均路况系数 = ETA × 基准车速 ÷ 直线距离，反算出来给日志展示；零距离退化为本格系数
         const double averageTrafficFactor = distance > 1e-9
             ? etaSeconds * kBaseRoadSpeedMetersPerSecond / distance
             : grid_.cell(cellX, cellY).trafficFactor;
@@ -451,6 +460,9 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
     }
 }
 
+// ETA 估算不建路网拓扑：起点到终点的直线按穿越的网格分段，每段取中点
+// 所在格的通行系数加权，再除以基准车速。系数 2.5 的拥堵段会让 ETA 明显
+// 变长，同距离下走畅通区的司机在堆里自然排到前面，撮合结果跟着路况走。
 double Simulator::estimateTravelTimeLocked(int fromX, int fromY, int toX, int toY) const {
     const double deltaX = static_cast<double>(toX - fromX);
     const double deltaY = static_cast<double>(toY - fromY);
@@ -488,19 +500,20 @@ Driver* Simulator::findBestDriverLocked(const Order& order, double& distance,
     const int centerY = GridIndex::coordinateToCell(order.y);
     MinHeap candidates;
 
+    // 以订单格为圆心逐圈外扫，候选全部压进堆，堆顶在循环结束后取
     for (int radius = 0; radius <= params_.matchRadius; ++radius) {
         for (int offsetY = -radius; offsetY <= radius; ++offsetY) {
             for (int offsetX = -radius; offsetX <= radius; ++offsetX) {
                 if (std::max(std::abs(offsetX), std::abs(offsetY)) != radius) {
-                    continue;
+                    continue;    // 内圈前几轮已扫过，只处理第 radius 圈新增的格子
                 }
                 const int cellX = centerX + offsetX;
                 const int cellY = centerY + offsetY;
                 if (GridIndex::flatten(cellX, cellY) < 0) {
-                    continue;
+                    continue;    // 越界圈直接跳过
                 }
                 Driver* current = grid_.cell(cellX, cellY).head;
-                while (current != nullptr) {
+                while (current != nullptr) {    // 逐个遍历该格空闲司机
                     const double deltaX = static_cast<double>(current->x - order.x);
                     const double deltaY = static_cast<double>(current->y - order.y);
                     const double candidateDistance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
@@ -530,14 +543,17 @@ Driver* Simulator::findBestDriverLocked(const Order& order, double& distance,
 
 void Simulator::rebalanceLocked(std::uint64_t currentTick) {
     std::uniform_int_distribution<int> offset(0, kCellSize - 1);
+    // 每拍全表扫一遍供需差。一万格线性扫描在 100ms 节拍预算内能跑完，
+    // 但它不计入撮合耗时指标，报告里的性能讨论不含这一段
     for (int targetY = 0; targetY < kGridSide; ++targetY) {
         for (int targetX = 0; targetX < kGridSide; ++targetX) {
             GridCell& target = grid_.cell(targetX, targetY);
             int imbalance = target.pendingCount - target.idleCount;
             if (imbalance <= params_.imbalanceThreshold) {
-                continue;
+                continue;    // 差值等于阈值不触发，对齐题目"超过阈值"的措辞
             }
             int moved = 0;
+            // 每个热点格每拍至多调入 2 人，防止单拍把周边运力抽空
             while (imbalance > params_.imbalanceThreshold && moved < 2) {
                 Driver* donor = findDonorDriverLocked(targetX, targetY);
                 if (donor == nullptr) {
@@ -546,9 +562,9 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
                 const int sourceIndex = donor->gridIndex;
                 grid_.removeDriver(donor);
                 donor->state = DriverState::Rebalancing;
-                donor->targetX = targetX * kCellSize + offset(schedulerRandom_);
+                donor->targetX = targetX * kCellSize + offset(schedulerRandom_);  // 热点格内随机落点
                 donor->targetY = targetY * kCellSize + offset(schedulerRandom_);
-                donor->readyTick = currentTick + 2 * kTicksPerSecond;
+                donor->readyTick = currentTick + 2 * kTicksPerSecond;             // 调度行程固定 2 秒
                 ++moved;
                 --imbalance;
 
@@ -640,6 +656,7 @@ std::string Simulator::paramsJson() const {
 }
 
 std::string Simulator::snapshotJson() const {
+    // 成功率按撮合决策口径算，分子里的订单可能还在接客或行程中；完成数单独累计
     std::lock_guard<std::mutex> lock(stateMutex_);
     std::ostringstream output;
     const std::uint64_t finalized = matched_ + cancelled_;
@@ -696,6 +713,8 @@ std::string Simulator::snapshotJson() const {
     return output.str();
 }
 
+// 以下仅测试构建（-DTAXI_TESTING）编入：开放清空状态、手工布置司机/订单、
+// 逐拍驱动 executeTick 等受控接口，测试才能在确定性前提下做精确断言
 #ifdef TAXI_TESTING
 void Simulator::testClearState() {
     std::lock_guard<std::mutex> lock(stateMutex_);
