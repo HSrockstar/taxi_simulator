@@ -146,6 +146,7 @@ h2 { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: .03em; }
 .chip-queue i { background: var(--amber); }
 .chip-rate i { background: var(--cyan); }
 .chip-alert i { background: transparent; border: 1.5px solid var(--red); border-radius: 2px; box-shadow: 0 0 7px rgba(255, 111, 125, .6); }
+.chip-traffic i { background: #ffc258; box-shadow: 0 0 7px rgba(255, 194, 88, .5); }
 .chip-enroute i { background: #ffba64; }
 .chip-ontrip i { background: #c4a4ff; }
 

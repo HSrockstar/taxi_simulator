@@ -59,6 +59,7 @@ struct MatchCandidate {
     Driver* driver = nullptr;
     double score = 0.0;
     double distance = 0.0;
+    double etaSeconds = 0.0;
 };
 
 struct SimulatorParams {

@@ -42,6 +42,7 @@ export interface DashboardSnapshot {
   hotspotIndex: number
   pending: number[]
   idle: number[]
+  traffic: number[]
   drivers: DriverSnapshot[]
   metrics: MetricsSnapshot
   params: ParamsSnapshot

@@ -48,6 +48,7 @@ public:
     void testClearState();
     void testSetAutoGenerate(bool enabled);
     void testSetIdleWander(bool enabled);
+    void testSetTrafficFactor(int cellX, int cellY, double factor);
     void testAddDriver(int slot, int id, int x, int y, double rating);
     void testPushOrder(std::uint64_t id, int x, int y, std::uint64_t createdTick = 0);
     void testTick();
@@ -71,8 +72,11 @@ private:
     void processOrdersLocked(std::uint64_t currentTick);
     void rebalanceLocked(std::uint64_t currentTick);
     void applyFleetChangeLocked(int previousCount, int newCount);
+    void refreshTrafficLocked(std::uint64_t currentTick);
     void appendParamsJson(std::ostringstream& output) const;
-    Driver* findBestDriverLocked(const Order& order, double& distance, double& score);
+    double estimateTravelTimeLocked(int fromX, int fromY, int toX, int toY) const;
+    Driver* findBestDriverLocked(const Order& order, double& distance,
+                                 double& etaSeconds, double& score);
     Driver* findDonorDriverLocked(int targetCellX, int targetCellY);
     static const char* driverStateName(DriverState state);
 

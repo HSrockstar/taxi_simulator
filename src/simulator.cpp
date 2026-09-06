@@ -26,6 +26,27 @@ int pickupTicksFor(double distance) {
 constexpr double kIdleWanderProbability = 0.05;
 constexpr double kIdleDriftBias = 0.7;
 
+// 简化路况模型：按穿过网格的通行系数估算接驾 ETA，而非引入道路拓扑。
+constexpr double kBaseRoadSpeedMetersPerSecond = 10.0;
+constexpr double kRatingTimeCreditSeconds = 0.5;
+constexpr int kTrafficRefreshTicks = 5 * kTicksPerSecond;
+
+void raiseTrafficBlob(GridIndex& grid, int centerX, int centerY, int radius, double factor) {
+    for (int offsetY = -radius; offsetY <= radius; ++offsetY) {
+        for (int offsetX = -radius; offsetX <= radius; ++offsetX) {
+            if (std::max(std::abs(offsetX), std::abs(offsetY)) > radius) {
+                continue;
+            }
+            const int cellX = centerX + offsetX;
+            const int cellY = centerY + offsetY;
+            if (GridIndex::flatten(cellX, cellY) >= 0) {
+                GridCell& cell = grid.cell(cellX, cellY);
+                cell.trafficFactor = std::max(cell.trafficFactor, factor);
+            }
+        }
+    }
+}
+
 }  // namespace
 
 Simulator::Simulator(std::uint32_t seed)
@@ -111,6 +132,9 @@ void Simulator::schedulerLoop() {
 void Simulator::executeTick() {
     const std::uint64_t currentTick = tick_.fetch_add(1) + 1;
     std::lock_guard<std::mutex> lock(stateMutex_);
+    if (currentTick % kTrafficRefreshTicks == 0) {
+        refreshTrafficLocked(currentTick);
+    }
     processDriverTransitionsLocked(currentTick);
     // 订单率参数的语义是"单/秒"，每个模拟秒（kTicksPerSecond 个 tick）批量生成一次
     if (autoGenerate_ && currentTick % kTicksPerSecond == 0) {
@@ -150,7 +174,29 @@ void Simulator::resetStateLocked() {
         driver.state = DriverState::Idle;
         grid_.addDriver(&driver);
     }
+    refreshTrafficLocked(0);
     logs_.push("[系统] 已初始化空闲司机，模拟时间归零");
+}
+
+void Simulator::refreshTrafficLocked(std::uint64_t currentTick) {
+    for (int index = 0; index < kGridCount; ++index) {
+        grid_.cellByIndex(index).trafficFactor = 1.0;
+    }
+
+    const int activeHotspot = static_cast<int>((currentTick / (30 * kTicksPerSecond)) % 3);
+    const int hotCellX = kHotspotOrigins[activeHotspot][0] / kCellSize;
+    const int hotCellY = kHotspotOrigins[activeHotspot][1] / kCellSize;
+    raiseTrafficBlob(grid_, hotCellX, hotCellY, 4, 1.5);
+    raiseTrafficBlob(grid_, hotCellX, hotCellY, 2, 2.5);
+
+    // 两处周期性事故点由模拟时间确定，既有动态变化，也保持同种子场景可复现。
+    const int phase = static_cast<int>(currentTick / kTrafficRefreshTicks);
+    for (int incident = 0; incident < 2; ++incident) {
+        const int cellX = (phase * 17 + 31 + incident * 43) % kGridSide;
+        const int cellY = (phase * 29 + 19 + incident * 37) % kGridSide;
+        raiseTrafficBlob(grid_, cellX, cellY, 2, 1.5);
+        raiseTrafficBlob(grid_, cellX, cellY, 1, 2.5);
+    }
 }
 
 void Simulator::applyFleetChangeLocked(int previousCount, int newCount) {
@@ -359,9 +405,10 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
         }
 
         double distance = 0.0;
+        double etaSeconds = 0.0;
         double score = 0.0;
         const auto startedAt = std::chrono::steady_clock::now();
-        Driver* driver = findBestDriverLocked(order, distance, score);
+        Driver* driver = findBestDriverLocked(order, distance, etaSeconds, score);
         const auto endedAt = std::chrono::steady_clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(endedAt - startedAt).count();
         totalMatchMicros_ += static_cast<std::uint64_t>(elapsed);
@@ -385,18 +432,55 @@ void Simulator::processOrdersLocked(std::uint64_t currentTick) {
         ++matched_;
 
         std::ostringstream message;
+        const double averageTrafficFactor = distance > 1e-9
+            ? etaSeconds * kBaseRoadSpeedMetersPerSecond / distance
+            : grid_.cell(cellX, cellY).trafficFactor;
         message << "[派单成功] 订单#" << order.id
                 << " (位置:" << order.x << ',' << order.y << ") 匹配司机#"
                 << std::setw(3) << std::setfill('0') << driver->id
                 << " (评分:" << std::fixed << std::setprecision(1) << driver->rating
                 << ", 距离:" << std::setprecision(1) << distance
-                << "米, 得分:" << std::setprecision(2) << score
+                << "米, 预计接驾:" << std::setprecision(1) << etaSeconds
+                << "秒, 平均路况系数:" << std::setprecision(2) << averageTrafficFactor
+                << ", 得分:" << std::setprecision(2) << score
                 << ", 耗时:" << elapsed << "us)";
         logs_.push(message.str());
     }
 }
 
-Driver* Simulator::findBestDriverLocked(const Order& order, double& distance, double& score) {
+double Simulator::estimateTravelTimeLocked(int fromX, int fromY, int toX, int toY) const {
+    const double deltaX = static_cast<double>(toX - fromX);
+    const double deltaY = static_cast<double>(toY - fromY);
+    const double distance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
+    if (distance <= 1e-9) {
+        const int cellX = GridIndex::coordinateToCell(fromX);
+        const int cellY = GridIndex::coordinateToCell(fromY);
+        return grid_.cell(cellX, cellY).trafficFactor * 0.0;
+    }
+
+    const int fromCellX = GridIndex::coordinateToCell(fromX);
+    const int fromCellY = GridIndex::coordinateToCell(fromY);
+    const int toCellX = GridIndex::coordinateToCell(toX);
+    const int toCellY = GridIndex::coordinateToCell(toY);
+    const int segments = std::max(std::abs(toCellX - fromCellX),
+                                  std::abs(toCellY - fromCellY)) + 1;
+    const double segmentDistance = distance / segments;
+    double weightedDistance = 0.0;
+    for (int segment = 0; segment < segments; ++segment) {
+        const double ratio = (static_cast<double>(segment) + 0.5) / segments;
+        const int sampleX = std::clamp(static_cast<int>(std::lround(fromX + deltaX * ratio)),
+                                       0, kMapSize - 1);
+        const int sampleY = std::clamp(static_cast<int>(std::lround(fromY + deltaY * ratio)),
+                                       0, kMapSize - 1);
+        const int cellX = GridIndex::coordinateToCell(sampleX);
+        const int cellY = GridIndex::coordinateToCell(sampleY);
+        weightedDistance += segmentDistance * grid_.cell(cellX, cellY).trafficFactor;
+    }
+    return weightedDistance / kBaseRoadSpeedMetersPerSecond;
+}
+
+Driver* Simulator::findBestDriverLocked(const Order& order, double& distance,
+                                        double& etaSeconds, double& score) {
     const int centerX = GridIndex::coordinateToCell(order.x);
     const int centerY = GridIndex::coordinateToCell(order.y);
     MinHeap candidates;
@@ -417,10 +501,13 @@ Driver* Simulator::findBestDriverLocked(const Order& order, double& distance, do
                     const double deltaX = static_cast<double>(current->x - order.x);
                     const double deltaY = static_cast<double>(current->y - order.y);
                     const double candidateDistance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
+                    const double candidateEta = estimateTravelTimeLocked(
+                        current->x, current->y, order.x, order.y);
                     candidates.push(MatchCandidate{
                         current,
-                        candidateDistance - current->rating,
-                        candidateDistance
+                        candidateEta - kRatingTimeCreditSeconds * current->rating,
+                        candidateDistance,
+                        candidateEta
                     });
                     current = current->next;
                 }
@@ -433,6 +520,7 @@ Driver* Simulator::findBestDriverLocked(const Order& order, double& distance, do
     }
     const MatchCandidate best = candidates.pop();
     distance = best.distance;
+    etaSeconds = best.etaSeconds;
     score = best.score;
     return best.driver;
 }
@@ -471,8 +559,8 @@ void Simulator::rebalanceLocked(std::uint64_t currentTick) {
 }
 
 Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
-    // 与撮合同款评分公式（Score = 距离 - 评分）：只从富余网格取供体，
-    // 半径内所有候选压入最小堆，堆顶即距离最近、评分最高的司机
+    // 与撮合同款 ETA 评分公式：只从富余网格取供体，
+    // 半径内所有候选压入最小堆，堆顶即预计到达最快、评分最高的司机。
     const int centerX = targetCellX * kCellSize + kCellSize / 2;
     const int centerY = targetCellY * kCellSize + kCellSize / 2;
     MinHeap candidates;
@@ -496,7 +584,14 @@ Driver* Simulator::findDonorDriverLocked(int targetCellX, int targetCellY) {
                     const double deltaX = static_cast<double>(current->x - centerX);
                     const double deltaY = static_cast<double>(current->y - centerY);
                     const double distance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
-                    candidates.push(MatchCandidate{current, distance - current->rating, distance});
+                    const double etaSeconds = estimateTravelTimeLocked(
+                        current->x, current->y, centerX, centerY);
+                    candidates.push(MatchCandidate{
+                        current,
+                        etaSeconds - kRatingTimeCreditSeconds * current->rating,
+                        distance,
+                        etaSeconds
+                    });
                 }
             }
         }
@@ -565,6 +660,11 @@ std::string Simulator::snapshotJson() const {
         if (index > 0) output << ',';
         output << grid_.cellByIndex(index).idleCount;
     }
+    output << "],\"traffic\":[";
+    for (int index = 0; index < kGridCount; ++index) {
+        if (index > 0) output << ',';
+        output << std::fixed << std::setprecision(1) << grid_.cellByIndex(index).trafficFactor;
+    }
     output << "],\"drivers\":[";
     for (int index = 0; index < params_.driverCount; ++index) {
         if (index > 0) output << ',';
@@ -618,6 +718,11 @@ void Simulator::testSetAutoGenerate(bool enabled) {
 void Simulator::testSetIdleWander(bool enabled) {
     std::lock_guard<std::mutex> lock(stateMutex_);
     idleWander_ = enabled;
+}
+
+void Simulator::testSetTrafficFactor(int cellX, int cellY, double factor) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    grid_.cell(cellX, cellY).trafficFactor = factor;
 }
 
 void Simulator::testAddDriver(int slot, int id, int x, int y, double rating) {

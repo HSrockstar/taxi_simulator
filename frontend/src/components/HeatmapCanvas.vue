@@ -105,6 +105,37 @@ function cellRgb(pending: number, idle: number): [number, number, number] {
   return pending > 0 ? [114, 83, 55] : [12, 30, 40]
 }
 
+function trafficLabel(factor: number): string {
+  if (factor >= 2.5) return '拥堵'
+  if (factor >= 1.5) return '缓行'
+  return '畅通'
+}
+
+function drawTrafficOverlay(context: CanvasRenderingContext2D, snapshot: DashboardSnapshot, cell: number): void {
+  for (let index = 0; index < 10000; index += 1) {
+    const factor = snapshot.traffic[index] ?? 1
+    if (factor <= 1) continue
+    const cellX = index % 100
+    const cellY = Math.floor(index / 100)
+    const left = cellX * cell
+    const top = cellY * cell
+    context.save()
+    context.beginPath()
+    context.rect(left, top, cell, cell)
+    context.clip()
+    context.strokeStyle = factor >= 2.5 ? 'rgba(255, 194, 88, .78)' : 'rgba(255, 214, 130, .48)'
+    context.lineWidth = Math.max(0.55, cell * 0.08)
+    const spacing = Math.max(2, cell * 0.45)
+    for (let offset = -cell; offset < cell * 2; offset += spacing) {
+      context.beginPath()
+      context.moveTo(left + offset, top + cell)
+      context.lineTo(left + offset + cell, top)
+      context.stroke()
+    }
+    context.restore()
+  }
+}
+
 function spriteFor(key: SpriteKey): HTMLCanvasElement {
   const cached = sprites.get(key)
   if (cached) return cached
@@ -189,6 +220,8 @@ function buildBase(snapshot: DashboardSnapshot, size: number): void {
   context.fillStyle = '#081720'
   context.fillRect(0, 0, size, size)
   context.drawImage(offscreen, 0, 0, size, size)
+  // 斜线叠层表达路况，保留红绿底色继续表示供需，避免两个语义混淆。
+  drawTrafficOverlay(context, snapshot, cell)
 
   context.strokeStyle = 'rgba(3, 12, 18, .88)'
   context.lineWidth = Math.max(0.5, cell * 0.04)
@@ -386,7 +419,7 @@ function handlePointer(event: PointerEvent): void {
   tooltip.value = {
     x: Math.min(event.clientX - bounds.left + 14, bounds.width - 216),
     y: Math.min(event.clientY - bounds.top + 14, bounds.height - 44),
-    text: `网格 (${cellX}, ${cellY}) · 等待订单 ${snapshot.pending[index]} · 空闲司机 ${snapshot.idle[index]}`,
+    text: `网格 (${cellX}, ${cellY}) · 等待订单 ${snapshot.pending[index]} · 空闲司机 ${snapshot.idle[index]} · 路况 ${trafficLabel(snapshot.traffic[index] ?? 1)} (${(snapshot.traffic[index] ?? 1).toFixed(1)}×)`,
   }
 }
 
@@ -423,6 +456,7 @@ onBeforeUnmount(() => {
         <span class="data-chip chip-demand"><i></i>需求缺口</span>
         <span class="data-chip chip-supply"><i></i>运力富余</span>
         <span class="data-chip chip-alert"><i></i>警报热点 ≥ <b>{{ snapshot?.params.imbalanceThreshold ?? 2 }}</b></span>
+        <span class="data-chip chip-traffic"><i></i>斜线：路况缓行/拥堵</span>
         <span class="data-chip chip-enroute"><i></i>前往接客</span>
         <span class="data-chip chip-ontrip"><i></i>行程中</span>
       </div>

@@ -14,6 +14,9 @@ struct GridCell {
     Driver* head = nullptr;
     int idleCount = 0;
     int pendingCount = 0;
+    // 道路通行系数：1.0 为畅通，数值越高代表同一路段耗时越长。
+    // 该字段与供需计数共用网格索引，避免引入额外的空间数据库。
+    double trafficFactor = 1.0;
 };
 
 class GridIndex {

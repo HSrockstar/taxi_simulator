@@ -161,6 +161,31 @@ void testMinHeap() {
 
 void testSimulatorAlgorithms() {
     taxi::Simulator simulator(12345);
+
+    // 路况 ETA：近车所在道路拥堵时，应让预计接驾更快的远车胜出。
+    simulator.testClearState();
+    taxi::SimulatorParams etaParams;
+    etaParams.matchRadius = 10;
+    check(simulator.updateParams(etaParams), "可调整撮合半径以覆盖 ETA 路况场景");
+    simulator.testAddDriver(0, 1, 100, 100, 4.0);
+    simulator.testAddDriver(1, 2, 200, 100, 4.0);
+    for (int cellX = 10; cellX <= 14; ++cellX) {
+        simulator.testSetTrafficFactor(cellX, 10, 2.5);
+    }
+    simulator.testPushOrder(100, 140, 100);
+    simulator.testTick();
+    check(simulator.testDriver(1).state == taxi::DriverState::EnRoute &&
+          simulator.testDriver(0).state == taxi::DriverState::Idle,
+          "近车遇拥堵时 ETA 更低的远车优先匹配");
+    const std::string trafficSnapshot = simulator.snapshotJson();
+    check(trafficSnapshot.find("\"traffic\":[") != std::string::npos &&
+          trafficSnapshot.find("2.5") != std::string::npos,
+          "快照包含独立网格路况数组");
+    check(trafficSnapshot.find("预计接驾") != std::string::npos &&
+          trafficSnapshot.find("平均路况系数") != std::string::npos,
+          "派单日志包含 ETA 与路况信息");
+
+    check(simulator.updateParams(taxi::SimulatorParams{}), "路况测试后恢复默认参数");
     simulator.testClearState();
     simulator.testAddDriver(0, 1, 105, 100, 4.0);
     simulator.testAddDriver(1, 2, 95, 100, 5.0);
