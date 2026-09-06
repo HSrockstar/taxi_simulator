@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620">
+  <style>text{font-family:Consolas,"Microsoft YaHei",monospace;fill:#d5f3ea}.title{font-family:"Microsoft YaHei",Arial,sans-serif;font-size:25px;font-weight:bold;fill:#17324d}.line{font-size:20px}.ok{fill:#72e0b5}.sum{font-size:24px;font-weight:bold;fill:#72e0b5}</style>
+  <rect width="1100" height="620" fill="#f7fbff"/><text x="550" y="42" text-anchor="middle" class="title">图 6  taxi_tests.exe 测试运行结果</text>
+  <rect x="70" y="80" width="960" height="470" rx="12" fill="#0d1b24"/><circle cx="105" cy="112" r="8" fill="#ed6a5e"/><circle cx="132" cy="112" r="8" fill="#f4bf4f"/><circle cx="159" cy="112" r="8" fill="#61c454"/>
+  <text x="105" y="160" class="line ok">[通过] 坐标边界映射、链表中部 O(1) 删除、司机跨网格迁移</text><text x="105" y="205" class="line ok">[通过] 订单队列 FIFO 与多生产者并发入队</text><text x="105" y="250" class="line ok">[通过] 最小堆手工扩容、得分/距离/评分决胜</text><text x="105" y="295" class="line ok">[通过] ETA 撮合、严格超过阈值、接客至完成状态流转</text><text x="105" y="340" class="line ok">[通过] 热点调度到达后参与下一轮撮合、同款堆选供体</text><text x="105" y="385" class="line ok">[通过] 确定性、空闲游走、运行时参数更新与越界拒绝</text><text x="105" y="430" class="line ok">[通过] HTTP 快照、控制、静态资源、404 拦截、SSE 首帧推送</text><text x="105" y="500" class="sum">测试完成：通过 55，失败 0</text>
+  <text x="550" y="585" text-anchor="middle" style="font-family:'Microsoft YaHei',Arial,sans-serif;font-size:16px;fill:#17324d">运行命令：taxi_tests.exe；本图根据本次实际终端输出整理。</text>
+</svg>
