@@ -21,6 +21,11 @@ int pickupTicksFor(double distance) {
     return std::clamp(ticks, 2, 6);
 }
 
+// 空闲司机游走：每秒 50% 概率移动一格；调度半径外的司机迈步时 70% 朝当前活跃热点漂移。
+// 仅作为"撮合半径外运力静止"的背景补充，半径内运力仍由显式调度机制主导
+constexpr double kIdleWanderProbability = 0.5;
+constexpr double kIdleDriftBias = 0.7;
+
 }  // namespace
 
 Simulator::Simulator(std::uint32_t seed)
@@ -204,6 +209,7 @@ void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
     for (int index = 0; index < params_.driverCount; ++index) {
         Driver& driver = drivers_[index];
         if (driver.state == DriverState::Idle) {
+            stepIdleDriverLocked(driver, currentTick);
             continue;
         }
         if (driver.state == DriverState::EnRoute || driver.state == DriverState::OnTrip) {
@@ -221,6 +227,42 @@ void Simulator::processDriverTransitionsLocked(std::uint64_t currentTick) {
         driver.activeOrderId = 0;
         grid_.addDriver(&driver);
     }
+}
+
+void Simulator::stepIdleDriverLocked(Driver& driver, std::uint64_t currentTick) {
+    if (!idleWander_) {
+        return;
+    }
+    std::uniform_real_distribution<double> roll(0.0, 1.0);
+    if (roll(schedulerRandom_) >= kIdleWanderProbability) {
+        return;
+    }
+
+    // 调度半径外的空闲车做定向漂移（平台调度够不着），半径内保持纯随机游走，
+    // 让"绿转红"运力转移的可视化仍由显式调度机制呈现
+    const int (&origin)[2] = kHotspotOrigins[(currentTick / 30) % 3];
+    const int hotCellX = origin[0] / kCellSize;
+    const int hotCellY = origin[1] / kCellSize;
+    const int myCellX = GridIndex::coordinateToCell(driver.x);
+    const int myCellY = GridIndex::coordinateToCell(driver.y);
+    const int gap = std::max(std::abs(myCellX - hotCellX), std::abs(myCellY - hotCellY));
+
+    int stepX = 0;
+    int stepY = 0;
+    if (gap > params_.rebalanceRadius && roll(schedulerRandom_) < kIdleDriftBias) {
+        stepX = (hotCellX > myCellX) - (hotCellX < myCellX);
+        stepY = (hotCellY > myCellY) - (hotCellY < myCellY);
+    } else {
+        std::uniform_int_distribution<int> direction(-1, 1);
+        stepX = direction(schedulerRandom_);
+        stepY = direction(schedulerRandom_);
+    }
+    if (stepX == 0 && stepY == 0) {
+        return;
+    }
+    const int newX = std::clamp(driver.x + stepX * kCellSize, 0, kMapSize - 1);
+    const int newY = std::clamp(driver.y + stepY * kCellSize, 0, kMapSize - 1);
+    grid_.moveDriver(&driver, newX, newY);
 }
 
 void Simulator::stepTripDriverLocked(int slot, Driver& driver, std::uint64_t currentTick) {
@@ -559,6 +601,7 @@ void Simulator::testClearState() {
     generated_.store(0);
     matched_ = cancelled_ = completed_ = matchAttempts_ = totalMatchMicros_ = 0;
     autoGenerate_ = false;
+    idleWander_ = false;
     for (int index = 0; index < kMaxDriverCount; ++index) {
         drivers_[index] = Driver{};
         activeOrders_[index] = Order{};
@@ -568,6 +611,11 @@ void Simulator::testClearState() {
 void Simulator::testSetAutoGenerate(bool enabled) {
     std::lock_guard<std::mutex> lock(stateMutex_);
     autoGenerate_ = enabled;
+}
+
+void Simulator::testSetIdleWander(bool enabled) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    idleWander_ = enabled;
 }
 
 void Simulator::testAddDriver(int slot, int id, int x, int y, double rating) {

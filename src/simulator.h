@@ -47,6 +47,7 @@ public:
 #ifdef TAXI_TESTING
     void testClearState();
     void testSetAutoGenerate(bool enabled);
+    void testSetIdleWander(bool enabled);
     void testAddDriver(int slot, int id, int x, int y, double rating);
     void testPushOrder(std::uint64_t id, int x, int y, std::uint64_t createdTick = 0);
     void testTick();
@@ -64,6 +65,7 @@ private:
     void executeTick();
     void resetStateLocked();
     void processDriverTransitionsLocked(std::uint64_t currentTick);
+    void stepIdleDriverLocked(Driver& driver, std::uint64_t currentTick);
     void stepTripDriverLocked(int slot, Driver& driver, std::uint64_t currentTick);
     void generateOrderBatchLocked(std::uint64_t currentTick);
     void processOrdersLocked(std::uint64_t currentTick);
@@ -98,6 +100,8 @@ private:
 
     std::mt19937 schedulerRandom_;
     bool autoGenerate_ = true;
+    // 空闲司机游走开关：测试通过 testClearState 关闭以隔离随机位移对断言的干扰
+    bool idleWander_ = true;
     std::uint64_t matched_ = 0;
     std::uint64_t cancelled_ = 0;
     std::uint64_t completed_ = 0;

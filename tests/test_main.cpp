@@ -8,9 +8,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -245,6 +248,73 @@ void testDeterminism() {
           "相同种子下订单生成与撮合结果完全可复现");
 }
 
+void testIdleWander() {
+    taxi::Simulator simulator(20260808);
+    simulator.testClearState();
+    simulator.testSetIdleWander(true);
+
+    // 16 个司机撒在远离三个热点的角落，任意 epoch 下都处于调度半径之外
+    constexpr int wanderDriverCount = 16;
+    for (int index = 0; index < wanderDriverCount; ++index) {
+        simulator.testAddDriver(index, index + 1, 880 + (index % 4) * 20, 880 + (index / 4) * 20, 4.5);
+    }
+    std::vector<std::pair<int, int>> initialPositions;
+    for (int index = 0; index < wanderDriverCount; ++index) {
+        const taxi::Driver driver = simulator.testDriver(index);
+        initialPositions.push_back({driver.x, driver.y});
+    }
+    for (int tick = 0; tick < 50; ++tick) simulator.testTick();
+
+    bool allValid = true;
+    bool gridConsistent = true;
+    bool anyMoved = false;
+    for (int index = 0; index < wanderDriverCount; ++index) {
+        const taxi::Driver driver = simulator.testDriver(index);
+        allValid = allValid && taxi::GridIndex::validCoordinate(driver.x) &&
+                   taxi::GridIndex::validCoordinate(driver.y);
+        gridConsistent = gridConsistent && driver.gridIndex ==
+            taxi::GridIndex::flatten(taxi::GridIndex::coordinateToCell(driver.x),
+                                     taxi::GridIndex::coordinateToCell(driver.y));
+        anyMoved = anyMoved || driver.x != initialPositions[index].first ||
+                   driver.y != initialPositions[index].second;
+    }
+    check(allValid, "游走司机坐标始终在地图范围内");
+    check(gridConsistent, "游走司机的网格索引与坐标保持一致");
+    check(anyMoved, "空闲司机游走确实发生位移");
+
+    const auto meanChebyshev = [&simulator](int centerX, int centerY) {
+        double total = 0.0;
+        for (int index = 0; index < wanderDriverCount; ++index) {
+            const taxi::Driver driver = simulator.testDriver(index);
+            total += std::max(std::abs(driver.x - centerX), std::abs(driver.y - centerY));
+        }
+        return total / wanderDriverCount;
+    };
+
+    // 定向漂移：29 tick 恰好覆盖 epoch 0（活跃热点恒为 (200,200)），
+    // 期望漂移步数约 29*0.5*0.7 ≈ 10 格，均值噪声不足 ±10 单位
+    simulator.testClearState();
+    simulator.testSetIdleWander(true);
+    for (int index = 0; index < wanderDriverCount; ++index) {
+        simulator.testAddDriver(index, index + 1, 880 + (index % 4) * 20, 880 + (index / 4) * 20, 4.5);
+    }
+    const double driftBefore = meanChebyshev(200, 200);
+    for (int tick = 0; tick < 29; ++tick) simulator.testTick();
+    const double driftAfter = meanChebyshev(200, 200);
+    check(driftBefore - driftAfter > 50.0, "调度半径外空闲司机向活跃热点定向漂移");
+
+    // 半径内：司机格距热点 4-10 格，不大于调度半径，不产生定向分量
+    simulator.testClearState();
+    simulator.testSetIdleWander(true);
+    for (int index = 0; index < wanderDriverCount; ++index) {
+        simulator.testAddDriver(index, index + 1, 240 + (index % 4) * 20, 240 + (index / 4) * 20, 4.5);
+    }
+    const double innerBefore = meanChebyshev(200, 200);
+    for (int tick = 0; tick < 29; ++tick) simulator.testTick();
+    const double innerAfter = meanChebyshev(200, 200);
+    check(std::abs(innerAfter - innerBefore) < 60.0, "调度半径内空闲司机不产生定向漂移");
+}
+
 void testDynamicParams() {
     taxi::Simulator simulator(2026);
     simulator.testClearState();
@@ -350,6 +420,7 @@ int main() {
     testMinHeap();
     testSimulatorAlgorithms();
     testDeterminism();
+    testIdleWander();
     testDynamicParams();
     testHttpServer();
     std::cout << "\n测试完成：通过 " << passed << "，失败 " << failed << '\n';
