@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="1020" viewBox="0 0 1260 1020">
+  <style>text{font-family:"Microsoft YaHei",Arial,sans-serif;fill:#17324d}.title{font-size:27px;font-weight:bold}.body{font-size:18px}.small{font-size:15px;fill:#49677b}.label{font-size:16px;font-weight:bold;fill:#355a76}.box{fill:#e8f5ff;stroke:#2a6f97;stroke-width:2.2}.end{fill:#eaf8e7;stroke:#2a6f97;stroke-width:2.2}.decision{fill:#fff5dc;stroke:#b5791d;stroke-width:2.2}.arrow{stroke:#497a9f;stroke-width:3;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#497a9f"/></marker></defs>
+  <rect width="1260" height="1020" fill="#f7fbff"/>
+  <text x="630" y="46" text-anchor="middle" class="title">图 3　网格化流式撮合流程</text>
+  <rect class="end" x="410" y="75" width="360" height="58" rx="29"/><text x="590" y="112" text-anchor="middle" class="body">开始：记录队内批量长度</text>
+  <path class="arrow" d="M590 133 V160"/>
+  <rect class="box" x="390" y="166" width="400" height="66" rx="12"/><text x="590" y="193" text-anchor="middle" class="body">逐单出队，计入订单所在格等待计数</text><text x="590" y="216" text-anchor="middle" class="small">每个订单在本拍只处理一次</text>
+  <path class="arrow" d="M590 232 V255"/>
+  <polygon class="decision" points="590,260 725,310 590,360 455,310"/><text x="590" y="316" text-anchor="middle" class="body">等待超过时限？</text>
+  <path class="arrow" d="M725 310 H830"/><text x="775" y="297" text-anchor="middle" class="label">是</text>
+  <rect class="box" x="835" y="270" width="290" height="80" rx="12"/><text x="980" y="300" text-anchor="middle" class="body">订单置为已取消</text><text x="980" y="326" text-anchor="middle" class="small">等待计数回退并记录日志</text>
+  <path class="arrow" d="M590 360 V390"/><text x="606" y="380" class="label">否</text>
+  <rect class="box" x="390" y="396" width="400" height="62" rx="12"/><text x="590" y="433" text-anchor="middle" class="body">按半径 0…R 逐圈扫描邻域格子</text>
+  <path class="arrow" d="M590 458 V484"/>
+  <rect class="box" x="390" y="490" width="400" height="66" rx="12"/><text x="590" y="518" text-anchor="middle" class="body">计算距离与路况 ETA，压入最小堆</text><text x="590" y="541" text-anchor="middle" class="small">链表中的空闲司机逐个成为候选</text>
+  <path class="arrow" d="M590 556 V582"/>
+  <polygon class="decision" points="590,587 725,637 590,687 455,637"/><text x="590" y="643" text-anchor="middle" class="body">堆中有候选？</text>
+  <path class="arrow" d="M725 637 H830"/><text x="775" y="624" text-anchor="middle" class="label">否</text>
+  <rect class="box" x="835" y="597" width="290" height="80" rx="12"/><text x="980" y="627" text-anchor="middle" class="body">撮合失败，订单重新入队</text><text x="980" y="653" text-anchor="middle" class="small">保留等待计数，下一拍再试</text>
+  <path class="arrow" d="M590 687 V714"/><text x="606" y="707" class="label">是</text>
+  <rect class="box" x="390" y="720" width="400" height="64" rx="12"/><text x="590" y="748" text-anchor="middle" class="body">弹出堆顶司机，从网格索引摘除</text><text x="590" y="771" text-anchor="middle" class="small">司机转为接客状态，时长为 ETA（至少 1 拍）</text>
+  <path class="arrow" d="M980 350 V802 H800"/><path class="arrow" d="M1125 637 H1165 V802 H800"/><path class="arrow" d="M590 784 V802"/>
+  <rect class="end" x="430" y="808" width="360" height="58" rx="29"/><text x="610" y="845" text-anchor="middle" class="body">当前订单处理结束</text>
+  <path class="arrow" d="M610 866 V875"/>
+  <polygon class="decision" points="610,880 740,920 610,960 480,920"/><text x="610" y="926" text-anchor="middle" class="body">本批还有订单？</text>
+  <path class="arrow" d="M480 920 H270 V199 H381"/><text x="285" y="903" class="label">是</text>
+  <path class="arrow" d="M610 960 V970"/><text x="628" y="971" class="label">否</text>
+  <rect class="end" x="500" y="978" width="220" height="32" rx="16"/><text x="610" y="1000" text-anchor="middle" class="small">本拍结束</text>
+</svg>

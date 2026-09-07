@@ -24,6 +24,7 @@ public:
     std::string lastError() const;
 
 private:
+    static std::string resolveWebRoot(std::string webRoot);
     void serverLoop();
     void handleClient(std::uintptr_t clientSocket);
     void handleStream(std::uintptr_t clientSocket);

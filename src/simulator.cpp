@@ -136,13 +136,13 @@ void Simulator::executeTick() {
     if (currentTick % kTrafficRefreshTicks == 0) {
         refreshTrafficLocked(currentTick);
     }
-    processDriverTransitionsLocked(currentTick);
+    processDriverTransitionsLocked(currentTick);  // 司机状态回退与空闲游走
     // 订单率参数的语义是"单/秒"，每个模拟秒（kTicksPerSecond 个 tick）批量生成一次
     if (autoGenerate_ && currentTick % kTicksPerSecond == 0) {
-        generateOrderBatchLocked(currentTick);
+        generateOrderBatchLocked(currentTick);  // 每个模拟秒批量生成订单
     }
-    processOrdersLocked(currentTick);
-    rebalanceLocked(currentTick);
+    processOrdersLocked(currentTick);  // 批量撮合
+    rebalanceLocked(currentTick);  // 失衡检测与动态调度
 }
 
 void Simulator::resetStateLocked() {

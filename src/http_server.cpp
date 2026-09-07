@@ -3,6 +3,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <windows.h>
+
 #include <cctype>
 #include <chrono>
 #include <fstream>
@@ -114,8 +116,27 @@ std::string contentTypeFor(const std::string& fileName) {
 
 }  // namespace
 
+// webRoot 只写相对路径时按 exe 所在目录解析，工作目录换到哪里都能找到页面资源
+std::string HttpServer::resolveWebRoot(std::string webRoot) {
+    const bool isAbsolute = webRoot.size() >= 2 && webRoot[1] == ':';
+    if (isAbsolute || (!webRoot.empty() && webRoot.front() == '\\')) {
+        return webRoot;
+    }
+    char modulePath[MAX_PATH];
+    const DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return webRoot;
+    }
+    const std::string directory(modulePath, length);
+    const std::size_t slash = directory.find_last_of("\\/");
+    if (slash == std::string::npos) {
+        return webRoot;
+    }
+    return directory.substr(0, slash + 1) + webRoot;
+}
+
 HttpServer::HttpServer(Simulator& simulator, std::uint16_t port, std::string webRoot)
-    : simulator_(simulator), port_(port), webRoot_(std::move(webRoot)) {}
+    : simulator_(simulator), port_(port), webRoot_(resolveWebRoot(std::move(webRoot))) {}
 
 HttpServer::~HttpServer() {
     stop();

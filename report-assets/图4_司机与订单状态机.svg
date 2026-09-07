@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="650" viewBox="0 0 1240 650">
+  <style>text{font-family:"Microsoft YaHei",Arial,sans-serif;fill:#17324d}.title{font-size:27px;font-weight:bold}.head{font-size:22px;font-weight:bold}.state{font-size:19px;font-weight:bold}.note{font-size:16px;fill:#41647c}.driver{fill:#e8f5ff;stroke:#2a6f97;stroke-width:2.2}.order{fill:#eaf8e7;stroke:#2d7d5a;stroke-width:2.2}.cancel{fill:#fff1ed;stroke:#b85645;stroke-width:2.2}.panel{fill:none;stroke:#bdd2e1;stroke-width:1.6;rx:16}.arrow{stroke:#497a9f;stroke-width:3;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#497a9f"/></marker></defs>
+  <rect width="1240" height="650" fill="#f7fbff"/>
+  <text x="620" y="45" text-anchor="middle" class="title">图 4　司机与订单状态机</text>
+  <rect class="panel" x="35" y="72" width="560" height="535"/><text x="315" y="112" text-anchor="middle" class="head">司机状态</text>
+  <rect class="panel" x="645" y="72" width="560" height="535"/><text x="925" y="112" text-anchor="middle" class="head">订单状态</text>
+  <rect class="driver" x="75" y="235" width="130" height="64" rx="28"/><text x="140" y="274" text-anchor="middle" class="state">空闲</text>
+  <rect class="driver" x="255" y="235" width="150" height="64" rx="28"/><text x="330" y="274" text-anchor="middle" class="state">接客途中</text>
+  <rect class="driver" x="455" y="235" width="130" height="64" rx="28"/><text x="520" y="274" text-anchor="middle" class="state">行程中</text>
+  <rect class="driver" x="75" y="430" width="130" height="64" rx="28"/><text x="140" y="469" text-anchor="middle" class="state">调度中</text>
+  <path class="arrow" d="M205 267 H247"/><text x="226" y="218" text-anchor="middle" class="note">撮合胜出</text>
+  <path class="arrow" d="M405 267 H447"/><text x="426" y="218" text-anchor="middle" class="note">到达上车点</text>
+  <path class="arrow" d="M520 235 V165 H140 V227"/><text x="330" y="153" text-anchor="middle" class="note">到达目的地，完成行程并重新入格</text>
+  <path class="arrow" d="M140 299 V422"/><text x="153" y="369" class="note">热点调度</text>
+  <path class="arrow" d="M205 462 H235 V330 H148 V307"/><text x="248" y="405" class="note">到达热点，回归空闲</text>
+  <rect class="order" x="690" y="235" width="125" height="64" rx="28"/><text x="752" y="274" text-anchor="middle" class="state">等待</text>
+  <rect class="order" x="905" y="235" width="125" height="64" rx="28"/><text x="968" y="274" text-anchor="middle" class="state">已匹配</text>
+  <rect class="order" x="905" y="430" width="125" height="64" rx="28"/><text x="968" y="469" text-anchor="middle" class="state">已完成</text>
+  <rect class="cancel" x="690" y="430" width="125" height="64" rx="28"/><text x="752" y="469" text-anchor="middle" class="state">已取消</text>
+  <path class="arrow" d="M815 267 H897"/><text x="856" y="218" text-anchor="middle" class="note">撮合成功</text>
+  <path class="arrow" d="M968 299 V422"/><text x="985" y="369" class="note">行程完成</text>
+  <path class="arrow" d="M752 299 V422"/><text x="767" y="369" class="note">等待超时</text>
+  <text x="925" y="560" text-anchor="middle" class="note">订单终态：已完成或已取消</text>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="650" viewBox="0 0 1100 650">
+  <style>text{font-family:"Microsoft YaHei",Arial,sans-serif;fill:#17324d}.title{font-size:27px;font-weight:bold}.body{font-size:18px}.value{font-size:22px;font-weight:bold}.note{font-size:15px;fill:#49677b}.grid{stroke:#c7d9e6;stroke-width:1.2}.axis{stroke:#17324d;stroke-width:2}.bar1{fill:#f29b5b}.bar2{fill:#98c6d4}.bar3{fill:#2a9d8f}</style>
+  <rect width="1100" height="650" fill="#f7fbff"/><text x="550" y="48" text-anchor="middle" class="title">图 7　调度机制对派单决策成功率的贡献</text>
+  <line class="axis" x1="155" y1="500" x2="970" y2="500"/><line class="axis" x1="155" y1="115" x2="155" y2="500"/><line class="grid" x1="155" y1="403" x2="970" y2="403"/><line class="grid" x1="155" y1="307" x2="970" y2="307"/><line class="grid" x1="155" y1="211" x2="970" y2="211"/><line class="grid" x1="155" y1="115" x2="970" y2="115"/>
+  <text x="104" y="506" class="body">0%</text><text x="93" y="409" class="body">15%</text><text x="93" y="313" class="body">30%</text><text x="93" y="217" class="body">45%</text><text x="93" y="121" class="body">60%</text>
+  <rect class="bar1" x="255" y="398" width="150" height="102"/><rect class="bar2" x="485" y="399" width="150" height="101"/><rect class="bar3" x="715" y="188" width="150" height="312"/>
+  <text x="330" y="385" text-anchor="middle" class="value">15.9%</text><text x="560" y="386" text-anchor="middle" class="value">15.8%</text><text x="790" y="175" text-anchor="middle" class="value">48.7%</text>
+  <text x="330" y="540" text-anchor="middle" class="body">调度弱化</text><text x="330" y="568" text-anchor="middle" class="note">半径 1，阈值 5</text><text x="560" y="540" text-anchor="middle" class="body">默认参数</text><text x="560" y="568" text-anchor="middle" class="note">r3 / d10 / t2 / w10</text><text x="790" y="540" text-anchor="middle" class="body">机制全开</text><text x="790" y="568" text-anchor="middle" class="note">r6 / d30 / t1 / w20</text>
+  <text x="550" y="620" text-anchor="middle" class="note">数据范围：当前口径 recheck_*；每组 600 模拟秒、3 个随机种子；柱高取区间中值。</text>
+</svg>
